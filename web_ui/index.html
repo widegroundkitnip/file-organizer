@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>File Organizer & Deduper</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Sidebar ── -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+        <line x1="12" y1="11" x2="12" y2="17"/>
+        <line x1="9" y1="14" x2="15" y2="14"/>
+      </svg>
+      <span>File Organizer</span>
+    </div>
+    <nav class="sidebar-nav">
+      <button class="nav-item active" data-page="scan" onclick="navigate('scan')">
+        <span class="nav-icon">🔍</span>
+        <span>Scan</span>
+      </button>
+      <button class="nav-item" data-page="results" onclick="navigate('results')">
+        <span class="nav-icon">📊</span>
+        <span>Results</span>
+      </button>
+      <button class="nav-item" data-page="rules" onclick="navigate('rules')">
+        <span class="nav-icon">📋</span>
+        <span>Rules</span>
+      </button>
+      <button class="nav-item" data-page="preview" onclick="navigate('preview')">
+        <span class="nav-icon">👁</span>
+        <span>Preview</span>
+      </button>
+      <button class="nav-item" data-page="execute" onclick="navigate('execute')">
+        <span class="nav-icon">⚡</span>
+        <span>Execute</span>
+      </button>
+      <button class="nav-item" data-page="settings" onclick="navigate('settings')">
+        <span class="nav-icon">⚙</span>
+        <span>Settings</span>
+      </button>
+    </nav>
+    <div class="sidebar-footer">Phase 3 · Local Only</div>
+  </aside>
+
+  <!-- ── Main content ── -->
+  <main class="main">
+
+    <!-- ── Page: Scan ── -->
+    <section class="page active" id="page-scan">
+      <div class="page-title">🔍 Scan Directory</div>
+      <div class="page-sub">Scan a folder to find files and duplicates.</div>
+      <div id="scan-alert"></div>
+
+      <div class="card">
+        <div class="form-group">
+          <label>Folder Path</label>
+          <input type="text" id="scan-path" placeholder="/home/user/Downloads" style="font-family: monospace">
+        </div>
+
+        <div class="form-group">
+          <label>Scan Mode</label>
+          <div class="toggle-group">
+            <button class="toggle-btn active" data-mode="fast">⚡ Fast</button>
+            <button class="toggle-btn" data-mode="deep">🔬 Deep (hash all)</button>
+          </div>
+          <div class="text-sm text-muted" style="margin-top:6px">Fast: walk + name/size duplicates. Deep: full SHA256 hashing (slower but exact).</div>
+        </div>
+
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="include-hidden">
+            Include hidden folders (dotfiles)
+          </label>
+        </div>
+
+        <div class="btn-group">
+          <button class="btn btn-primary" id="btn-scan" onclick="startScan()">🔍 Start Scan</button>
+        </div>
+
+        <div id="scan-progress" class="hidden" style="margin-top:14px">
+          <div class="progress-wrap"><div class="progress-bar" style="width:100%"></div></div>
+          <div class="text-sm text-muted" id="scan-status" style="margin-top:6px">Scanning…</div>
+        </div>
+      </div>
+
+      <!-- Recent scans -->
+      <div class="card">
+        <div class="card-title">Recent Scans</div>
+        <div id="scan-history">
+          <div class="empty-state"><div class="empty-state-icon">🕐</div><div>No recent scans</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Page: Results ── -->
+    <section class="page" id="page-results">
+      <div class="page-title">📊 Scan Results</div>
+      <div class="page-sub">Review files by category and inspect duplicate groups.</div>
+
+      <div class="btn-group mb-16">
+        <button class="btn btn-secondary" onclick="navigate('rules')">📋 Configure Rules</button>
+        <button class="btn btn-primary" onclick="navigate('preview')">👁 Preview Plan</button>
+      </div>
+
+      <div id="results-content">
+        <div class="empty-state">
+          <div class="empty-state-icon">📂</div>
+          <div>No scan loaded. Run a scan first.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Page: Rules ── -->
+    <section class="page" id="page-rules">
+      <div class="page-title">📋 Rules Builder</div>
+      <div class="page-sub">Define rules to match files and set destinations. First matching rule wins.</div>
+      <div id="rules-alert"></div>
+
+      <div class="btn-group mb-16">
+        <button class="btn btn-primary" onclick="showAddRuleForm()">+ Add Rule</button>
+        <button class="btn btn-secondary" onclick="saveRules()">💾 Save Rules</button>
+        <button class="btn btn-secondary" onclick="navigate('preview')">👁 Preview Plan</button>
+      </div>
+
+      <!-- Add rule form -->
+      <div class="card hidden" id="add-rule-form">
+        <div class="card-title">New Rule</div>
+        <div class="rule-grid">
+          <div class="form-group">
+            <label>Rule Name</label>
+            <input type="text" id="new-rule-name" placeholder="e.g. PDFs to Documents">
+          </div>
+          <div class="form-group">
+            <label>Category</label>
+            <select id="new-rule-category">
+              <option>Images</option>
+              <option>Documents</option>
+              <option>Videos</option>
+              <option>Audio</option>
+              <option>Code</option>
+              <option>Archives</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Filter Type</label>
+            <select id="new-filter-type" onchange="updateFilterValueLabel()">
+              <option value="extension">Extension</option>
+              <option value="name_contains">Name Contains</option>
+              <option value="name_pattern">Name Pattern (glob)</option>
+              <option value="size_gt">Size Greater Than</option>
+              <option value="size_lt">Size Less Than</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label id="filter-value-label">Extensions (comma-separated)</label>
+            <input type="text" id="new-filter-value" placeholder="pdf, docx">
+            <div class="text-sm text-muted" id="filter-value-hint" style="margin-top:4px">e.g. pdf, jpg, png</div>
+          </div>
+          <div class="form-group">
+            <label>Subfolder (optional)</label>
+            <input type="text" id="new-rule-subfolder" placeholder="PDFs">
+          </div>
+          <div class="form-group">
+            <label>Destination Template</label>
+            <input type="text" id="new-rule-template" placeholder="{category}/{subfolder}/{name}.{ext}">
+            <div class="text-sm text-muted" style="margin-top:4px">Variables: {category} {subfolder} {name} {ext} {year} {month} {date}</div>
+          </div>
+        </div>
+        <div class="btn-group" style="margin-top:8px">
+          <button class="btn btn-primary" onclick="addRule()">✓ Add Rule</button>
+          <button class="btn btn-secondary" onclick="showAddRuleForm()">Cancel</button>
+        </div>
+      </div>
+
+      <!-- Rules list -->
+      <div id="rules-list"></div>
+    </section>
+
+    <!-- ── Page: Preview ── -->
+    <section class="page" id="page-preview">
+      <div class="page-title">👁 Action Plan Preview</div>
+      <div class="page-sub">Review the planned moves, deletes, and skips before executing.</div>
+      <div id="preview-alert"></div>
+
+      <div class="btn-group mb-16">
+        <button class="btn btn-primary" id="btn-preview" onclick="buildPreview()">👁 Build Preview</button>
+        <button class="btn btn-secondary" onclick="navigate('rules')">← Back to Rules</button>
+        <button class="btn btn-accent" onclick="navigate('execute')">⚡ Go to Execute</button>
+      </div>
+
+      <div id="preview-content">
+        <div class="empty-state">
+          <div class="empty-state-icon">📋</div>
+          <div>Click "Build Preview" to generate an action plan from the current rules.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Page: Execute ── -->
+    <section class="page" id="page-execute">
+      <div class="page-title">⚡ Execute</div>
+      <div class="page-sub">Run the selected actions. Files are moved to trash (not permanently deleted).</div>
+      <div id="execute-alert"></div>
+
+      <div class="card">
+        <div class="rule-grid">
+          <div class="form-group">
+            <label>Output Directory</label>
+            <input type="text" id="exec-output-dir" placeholder="/tmp/file-organizer-output" style="font-family:monospace">
+          </div>
+          <div class="form-group">
+            <label>Conflict Mode</label>
+            <select id="exec-conflict">
+              <option value="rename">Rename (_1, _2…)</option>
+              <option value="skip">Skip (leave existing)</option>
+              <option value="overwrite">Overwrite ⚠</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="exec-dry-run">
+            Dry run (simulate — no files changed)
+          </label>
+        </div>
+
+        <div id="execute-content"></div>
+
+        <div class="btn-group" style="margin-top:12px">
+          <button class="btn btn-accent" id="btn-execute" onclick="executePlan()">⚡ Execute Plan</button>
+          <button class="btn btn-secondary" onclick="navigate('preview')">← Back to Preview</button>
+        </div>
+      </div>
+
+      <!-- Progress -->
+      <div class="card">
+        <div class="card-title">Execution Log</div>
+        <div class="progress-wrap" style="margin-bottom:12px">
+          <div class="progress-bar" id="exec-progress-bar" style="width:0%"></div>
+        </div>
+        <div class="live-feed" id="live-feed">
+          <div class="feed-line text-muted">Ready. Press "Execute Plan" to start.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Page: Settings ── -->
+    <section class="page" id="page-settings">
+      <div class="page-title">⚙ Settings</div>
+      <div class="page-sub">Configure directories, conflict modes, and theme colors.</div>
+      <div id="settings-alert"></div>
+
+      <div class="btn-group mb-16">
+        <button class="btn btn-primary" onclick="saveSettings()">💾 Save Settings</button>
+      </div>
+
+      <div id="settings-content">
+        <div class="empty-state"><div class="spinner"></div></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ── Modal ── -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal">
+    <div class="modal-title" id="modal-title">Confirm</div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="modalCancel()">Cancel</button>
+      <button class="btn btn-danger" onclick="modalConfirm()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+</body>
+</html>

@@ -1,8 +1,21 @@
 # file-organizer
 
-A fast, memory-efficient file scan, deduplication, and execution CLI.
+A fast, memory-efficient file scan, deduplication, and execution tool.
 - **Phase 1:** Scan Engine (`organizer.py`)
 - **Phase 2:** Execution Engine (`executor.py`)
+- **Phase 3:** Web UI + Rule Engine (`app.py`, `planner.py`)
+
+## Phase 3 — Web UI
+
+```bash
+pip install -r requirements.txt
+uvicorn app:app --host 0.0.0.0 --port 3001 --reload
+# Open http://localhost:3001
+```
+
+**Workflow:** Scan → Results → Rules → Preview → Execute
+
+---
 
 ## Install
 
