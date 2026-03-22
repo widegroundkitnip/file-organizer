@@ -195,19 +195,34 @@ def find_duplicates(files: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def find_empty_folders(root: str, include_hidden: bool) -> list[str]:
-    """Return list of empty directory paths (no files, recursively)."""
-    empty: list[str] = []
-    # We do a bottom-up walk
+    """Return list of effectively-empty directory paths.
+
+    A directory is effectively empty if it contains no files AND all of its
+    subdirectories (recursively) are also effectively empty.  Walking bottom-up
+    (topdown=False) means a parent is processed only after all its children, so
+    we can look up child status in the already-built empty_set.
+    """
+    empty_set: set[str] = set()
+
     for dirpath, dirnames, filenames in os.walk(root, topdown=False):
-        # Prune excluded dirs
-        dirnames[:] = [
-            d for d in dirnames
+        # Filter out always-excluded and (optionally) hidden dirs from consideration.
+        # NOTE: in topdown=False mode dirnames[:] does NOT prune traversal, but we
+        # use it purely as the list of relevant children to check below.
+        relevant_subdirs = [
+            os.path.join(dirpath, d)
+            for d in dirnames
             if d not in ALWAYS_EXCLUDED and (include_hidden or not d.startswith("."))
         ]
-        # A folder is empty if it has no files and no non-excluded subdirs with content
-        if not filenames and not dirnames:
-            empty.append(dirpath)
-    return empty
+
+        has_files = bool(filenames)
+        all_subdirs_empty = all(p in empty_set for p in relevant_subdirs)
+
+        if not has_files and all_subdirs_empty:
+            empty_set.add(dirpath)
+
+    # Exclude root itself
+    empty_set.discard(root)
+    return sorted(empty_set)
 
 
 def find_hidden_folders(root: str) -> list[str]:
