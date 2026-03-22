@@ -66,6 +66,119 @@ file_organizer/
 
 ---
 
+## File Type Classification
+
+### Classification Rules
+
+Every file is classified into exactly one category:
+
+| Category | Rule |
+|----------|------|
+| Known | Has a recognized extension AND matches a known type |
+| Unknown | No extension, OR extension not recognized |
+| System | Extension indicates system artifact (`.pyc`, `.DS_Store`, `.lock`, `.tmp`) |
+
+**Known files:** Subject to normal rules and auto-actions.
+
+**Unknown files:** Never auto-moved, auto-renamed, or auto-deleted. Always surfaced for explicit user decision.
+
+Examples of "unknown" and what the system might suggest:
+
+| File pattern | Likely type | System suggestion |
+|---|---|---|
+| `94884092518704` (no ext, large, in `archive/data/`) | Dataset shard / ML artifact | "Likely downloaded cache — confirm before any action" |
+| `config` (no ext, no size, in repo root) | Git submodule marker or config | "Dotfile or system config — keep untouched" |
+| `FEDCBA9876543210` (hex, no ext, small) | Session token, lock file, or crash dump | "System artifact — verify before deletion" |
+| `somefile.tar` (has name, no extension but known container name) | Archive with missing extension | "Archive may be missing extension — open to inspect before action" |
+
+### Unknown File Behavior
+
+```
+UNKNOWN_FILE_RULE:
+  - Never include in auto-action plans
+  - Always list in "Review Required" section of preview
+  - Visual badge: "⚠ Unknown" in UI
+  - Destructive actions blocked by default
+  - User must explicitly approve each unknown file action
+```
+
+### Folder Deletion Rules
+
+```
+FOLDER_DELETION_GUARD:
+  before_delete_folder(path):
+    files = list_all_files(path, recursive=True)
+    unknown_files = [f for f in files if f.category == UNKNOWN]
+    known_deletable = [f for f in files if f.category == KNOWN and f.marked_for_deletion]
+    
+    if known_deletable == all files in folder AND unknown_files == []:
+      → DELETE folder (safe, all contents are known and marked)
+    
+    elif unknown_files > 0 AND known_deletable == all known files:
+      → BLOCK automatic deletion
+      → Surface to user: "This folder contains X unknown files. Cannot delete automatically."
+    
+    else:
+      → BLOCK automatic deletion
+      → Surface: "This folder has mixed contents. Review manually."
+```
+
+---
+
+## Parent Folder Boundaries
+
+### Concept
+Any folder can be marked as a **parent folder boundary** — a hard operational stop. No action (move, delete, rename) can cross this boundary without explicit user approval.
+
+### Use Case
+```
+Filmmaking/
+├── Projects/
+│   ├── Project_A/    ← marked as parent boundary
+│   └── Project_B/    ← marked as parent boundary
+```
+
+### Marking a Parent Folder
+- User right-clicks any folder in scan results → "Mark as Parent Boundary"
+- Stored in settings as an array of absolute paths
+- Persists across scans
+- Visual indicator in UI: 🔒 icon
+
+### Boundary Behavior Matrix
+
+| Action | Boundary: inside | Boundary: ancestor of target |
+|--------|-----------------|------------------------------|
+| Move file into boundary | ⚠️ Blocked (requires explicit approval) | ✅ Allowed |
+| Move file out of boundary | ⚠️ Blocked | ✅ Allowed |
+| Delete folder inside boundary | ⚠️ Blocked | ✅ Allowed |
+| Restructure ancestor of boundary | ✅ Allowed | N/A |
+| Analyze subtree under boundary | ✅ Allowed | N/A |
+
+### Conflict Detection
+```
+PARENT_BOUNDARY_CHECK:
+  before_execute_action(action):
+    if action crosses parent_boundary:
+      → BLOCK action
+      → Add to blocked_actions list
+      → Surface: "This action would affect parent boundary at /path/Boundary"
+
+PARENT_BOUNDARY_CROSS_CONFLICT:
+  before_execution_plan_submit(plan):
+    conflicts = [a for a in plan if a.touches_parent_boundary]
+    if conflicts:
+      → ABORT submission
+      → Surface all conflicts to user
+      → Require user to: [Remove conflicting actions] or [Unmark boundary] or [Cancel]
+```
+
+### UI Presentation
+- Locked folders shown with 🔒 in scan results
+- Crossing a boundary → orange warning card in preview
+- Execute page: "Blocked Actions" section (0 items = clean to run)
+
+---
+
 ## Duplicate Detection Modes
 
 ### Tier 1 — Exact (SHA256)
@@ -475,6 +588,12 @@ Inspired by OpenClaw's approach but simplified:
     "Other": {"enabled": true, "subfolders": []}
   },
   "rules": [],
+  "parent_folders": [],  # absolute paths marked as parent boundaries
+  "scan": {
+    "exclude_dirs": [".git", "__pycache__", ".venv", "node_modules", ".DS_Store", "node_modules", ".Trash", "$RECYCLE.BIN"],
+    "exclude_known_system": true,  # auto-exclude .pyc, .DS_Store, etc.
+    "unknown_file_policy": "review"  # always surface unknown files to user
+  },
   "theme": {
     "primary_color": "#6366f1",
     "bg_color": "#0f172a",
