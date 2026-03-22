@@ -334,14 +334,45 @@ class AICategorizer(Protocol):
 {
   "ai": {
     "enabled": false,
-    "provider": "local",
-    "model": "sentence-transformers/all-MiniLM-L6-v2",
+    "provider": "openai",
+    "api_key_env": "OPENAI_API_KEY",
+    "model": "gpt-4o-mini",
     "image_model": "ResNet50",
     "semantic_threshold": 0.85,
     "rule_learner_enabled": true
   }
 }
 ```
+
+### Provider Support (v2)
+Supported providers with API key or OAuth:
+
+| Provider | Auth | Models |
+|---------|------|--------|
+| OpenAI | API key + OAuth | GPT-4o, GPT-4o-mini, o3, o4-mini |
+| Anthropic | API key + OAuth | Claude 3.5 Sonnet, 3.7, Opus |
+| Google AI Studio | API key + OAuth | Gemini 2.0 Flash, 2.5 Pro, 3.0 |
+| Groq | API key | Llama 4, Mistral, Qwen |
+| Ollama | Local (no key) | Any local model |
+| LM Studio | Local (no key) | Any local model |
+| Local model (raw) | None | HuggingFace, GGUF, etc. |
+
+### AI Provider UI (v2)
+- Settings page: "Connect AI" section
+- User pastes API key OR clicks "Connect with OAuth" (opens provider OAuth flow)
+- Dropdown to select provider
+- Model auto-detects available models for selected provider
+- Connection test: "Verifying..." → ✅ Connected or ❌ Invalid
+- All credentials stored locally, never transmitted except to the provider
+- No telemetry, no third-party logging
+
+### Design Principle
+Inspired by OpenClaw's approach but simplified:
+- OpenClaw is powerful but complex to configure
+- File Organizer: one field for API key, one dropdown for provider, one for model — done
+- OAuth where supported (OpenAI, Anthropic, Google) for keyless flow
+- Fall back to local models if no API key provided
+- "AI Features require an API key to enable" shown in UI when not configured
 
 ---
 
