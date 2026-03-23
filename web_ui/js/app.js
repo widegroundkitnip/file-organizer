@@ -1779,11 +1779,7 @@ var helpSections = {
   scan: `<h2 style="color:var(--accent);margin-bottom:12px">🔍 Scan</h2>
 <p>Enter a folder path and click <strong>Scan</strong> to inventory all files. The app finds duplicates, organizes files by type, and builds a folder map.</p>
 <h3 style="margin-top:16px;color:var(--text)">Run Profile</h3>
-<p>Choose a <strong>Run Profile</strong> to pre-load relevant rules. Generic = no rules. Images/Videos/Documents/Code = category-specific rules. Duplicates = focus on finding dupes.</p>
-<h3 style="margin-top:16px;color:var(--text)">Intent Mode</h3>
-<p>Choose what to do: <strong>Organize only</strong> (sort by category), <strong>Duplicates only</strong> (find dupes), or <strong>Both</strong>.</p>
-<h3 style="margin-top:16px;color:var(--text)">Scope / Safety</h3>
-<p><strong>Preserve boundaries</strong>: files stay within selected folders. <strong>Global organize</strong>: files may cross folders. <strong>Project-safe</strong>: detected code/data projects are protected.</p>
+<p>Choose a <strong>Run Profile</strong> to pre-load relevant rules. Generic = no rules. Images/Videos/Documents/Code = category-specific rules. Duplicates = focus on finding dupes. Clicking a profile adds its rules to the Rules Builder (rules start disabled — enable what you want).</p>
 <h3 style="margin-top:16px;color:var(--text)">Scan Modes</h3>
 <p><strong>Fast</strong>: filename + size duplicates only. <strong>Deep</strong>: full SHA256 hash — slower but accurate.</p>`,
 
