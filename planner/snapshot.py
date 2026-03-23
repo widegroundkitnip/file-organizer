@@ -10,12 +10,30 @@ SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 def create_snapshot(manifest: dict, plan: dict, rules: list, profile_id: str = None) -> str:
     """Create a pre-run snapshot. Returns snapshot_id."""
     snapshot_id = hashlib.sha256(str(datetime.now()).encode()).hexdigest()[:12]
+
+    # Normalize rules: handle both Rule objects and plain dicts (e.g. from JSON API)
+    normalized_rules = []
+    for r in rules:
+        if isinstance(r, dict):
+            normalized_rules.append({
+                "id": r.get("id"),
+                "name": r.get("name"),
+                "action": r.get("action"),
+            })
+        else:
+            # Assume Rule-like object with .id, .name, .action attributes
+            normalized_rules.append({
+                "id": getattr(r, "id", None),
+                "name": getattr(r, "name", None),
+                "action": getattr(r, "action", None),
+            })
+
     snap = {
         "id": snapshot_id,
         "created_at": datetime.now().isoformat(),
         "profile": profile_id,
         "file_count": len(manifest.get("files", [])),
-        "rules": [{"id": r.id, "name": r.name, "action": r.action} for r in rules],
+        "rules": normalized_rules,
         "plan_actions": len(plan.get("actions", [])),
         "scanned_paths": manifest.get("scanned_paths", []),
     }
