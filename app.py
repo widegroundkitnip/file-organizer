@@ -677,7 +677,8 @@ async def api_folder_picker(req: dict):
 async def api_mock_create(req: dict):
     """Generate mock test workspace. Body: {path: str, size_gb: int, categories: list[str]}"""
     categories = req.get("categories", [])
-    size_gb = req.get("size_gb", 10)
+    # Generator requires int ≥ 1 — round floats to nearest int, min 1
+    size_gb = max(1, round(req.get("size_gb", 10)))
     output_dir = os.path.expanduser(req.get("path", "~/test_workspace"))
 
     result = subprocess.run(
