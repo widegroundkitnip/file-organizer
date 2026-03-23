@@ -215,11 +215,19 @@
             <label>Category</label>
             <select id="new-rule-category">
               <option>Images</option>
-              <option>Documents</option>
               <option>Videos</option>
+              <option>Documents</option>
               <option>Audio</option>
               <option>Code</option>
               <option>Archives</option>
+              <option>Apps</option>
+              <option>Design</option>
+              <option>Fonts</option>
+              <option>Data</option>
+              <option>Models</option>
+              <option>LargeFiles</option>
+              <option>Unknown</option>
+              <option>Temp</option>
               <option>Other</option>
             </select>
           </div>
@@ -297,6 +305,7 @@
     <!-- ── Page: Execute ── -->
     <section class="page" id="page-execute">
       <div id="dry-run-banner" style="display:none;background:#f59e0b;color:#000;padding:10px 16px;border-radius:8px;font-weight:bold;text-align:center;margin-bottom:12px">⚠ DRY RUN ACTIVE — No files will be modified</div>
+      <div id="execute-warning-banner" style="display:none;background:#ef444420;border:1px solid #ef4444;border-radius:8px;padding:12px;margin-bottom:16px;color:var(--error);font-size:13px"><strong>⚠ Files will be modified</strong> — Dry Run is OFF. Review the Preview first. Protected folders and project roots are still respected.</div>
       <div class="page-title">⚡ Execute</div>
       <div class="page-sub">Run the selected actions. Files are moved to trash (not permanently deleted).</div>
       <div id="execute-alert"></div>
@@ -318,7 +327,7 @@
         </div>
         <div class="form-group">
           <label class="checkbox-label" data-tooltip="Simulation mode — shows what would happen without moving any files. Always review Preview first.">
-            <input type="checkbox" id="exec-dry-run">
+            <input type="checkbox" id="exec-dry-run" onchange="updateExecuteBanners()">
             Dry run (simulate — no files changed)
           </label>
         </div>

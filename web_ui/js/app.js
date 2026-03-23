@@ -733,6 +733,14 @@ function renderExecution() {
   }
 }
 
+function updateExecuteBanners() {
+  const dryRun = document.getElementById('exec-dry-run')?.checked || false;
+  const banner = document.getElementById('dry-run-banner');
+  const warningBanner = document.getElementById('execute-warning-banner');
+  if (banner) banner.style.display = dryRun ? 'block' : 'none';
+  if (warningBanner) warningBanner.style.display = dryRun ? 'none' : 'block';
+}
+
 async function executePlan() {
   const selected = getSelectedActions();
   if (!selected.length) {
@@ -743,7 +751,9 @@ async function executePlan() {
   const outputDir = document.getElementById('exec-output-dir')?.value?.trim() || '/tmp/file-organizer-output';
   const dryRun = document.getElementById('exec-dry-run')?.checked || false;
   const banner = document.getElementById('dry-run-banner');
+  const warningBanner = document.getElementById('execute-warning-banner');
   if (banner) banner.style.display = dryRun ? 'block' : 'none';
+  if (warningBanner) warningBanner.style.display = dryRun ? 'none' : 'block';
   const onConflict = document.getElementById('exec-conflict')?.value || 'rename';
 
   const confirmed = await showConfirmModal(
