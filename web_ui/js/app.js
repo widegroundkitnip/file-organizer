@@ -712,6 +712,8 @@ async function executePlan() {
 
   const outputDir = document.getElementById('exec-output-dir')?.value?.trim() || '/tmp/file-organizer-output';
   const dryRun = document.getElementById('exec-dry-run')?.checked || false;
+  const banner = document.getElementById('dry-run-banner');
+  if (banner) banner.style.display = dryRun ? 'block' : 'none';
   const onConflict = document.getElementById('exec-conflict')?.value || 'rename';
 
   const confirmed = await showConfirmModal(

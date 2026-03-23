@@ -65,9 +65,16 @@ app.add_middleware(
 
 def load_settings() -> dict:
     if SETTINGS_PATH.exists():
-        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+        try:
+            with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"[SETTINGS] Corrupted settings.json ({e}) — using defaults")
+    return {
+        "parent_folders": [],
+        "rules": [],
+        "exclude_patterns": [],
+    }
 
 
 def save_settings(data: dict) -> None:
@@ -306,6 +313,19 @@ async def api_execute(req: ExecuteRequest):
     with open(plan_path, "w", encoding="utf-8") as f:
         json.dump(normalized_plan, f, indent=2)
 
+    # Pre-flight: verify all source files exist before touching anything
+    missing = []
+    for item in normalized_plan:
+        if item.get("action") in ("move", "delete"):
+            src = item.get("src") or item.get("path", "")
+            if not os.path.exists(src):
+                missing.append(src)
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Source files not found (deleted since scan?): {missing[:5]}"
+        )
+
     cmd = [
         sys.executable, str(BASE_DIR / "executor.py"),
         "execute",
@@ -441,6 +461,7 @@ async def scan_multi(req: MultiPathScanRequest):
         "structure": structure,
         "unknown_files": unknown_files[:100],
         "unknown_count": len(unknown_files),
+        "is_empty": len(manifest["files"]) == 0,
     }
 
 

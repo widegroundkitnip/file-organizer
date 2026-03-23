@@ -27,8 +27,8 @@ def is_pycache(name: str) -> bool:
     return name == "__pycache__" or name.endswith(".pyc")
 
 def normalize_path(path: str) -> str:
-    """Normalize path separators to forward slash."""
-    return path.replace(os.sep, "/")
+    """Normalize path separators to forward slash, strip null bytes (defensive)."""
+    return path.replace(os.sep, "/").replace("\x00", "")
 
 def get_relative_path(src_path: str, scan_root: str) -> str:
     """Get path relative to scan root."""

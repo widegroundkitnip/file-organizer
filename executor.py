@@ -353,6 +353,18 @@ def execute_plan(
                 sys.exit(1)
 
             try:
+                # Disk space check before write
+                try:
+                    import shutil as _shutil
+                    total, used, free = _shutil.disk_usage(dst_parent)
+                    src_size = os.path.getsize(src) if os.path.exists(src) else 0
+                    if free < src_size * 1.1:  # need 10% headroom
+                        print(f"[ERROR] disk full on {dst_parent!r}: {free} bytes free, need ~{src_size}")
+                        undo_log.update(idx, status="error", reason="disk full")
+                        continue  # skip this file instead of crashing
+                except Exception:
+                    pass  # don't let space check failures block the move
+
                 Path(dst_parent).mkdir(parents=True, exist_ok=True)
 
                 cross = is_cross_device(src, dst_parent)

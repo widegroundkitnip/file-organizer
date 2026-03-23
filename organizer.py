@@ -83,6 +83,7 @@ class HashCache:
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_path ON file_hashes(path)")
+            conn.execute("PRAGMA journal_mode=WAL")  # concurrent write support
             conn.commit()
             self._local.conn = conn
         return self._local.conn
