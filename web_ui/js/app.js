@@ -125,7 +125,7 @@ function fmtDate(iso) {
 
 function categoryClass(cat) {
   const map = {
-    Images: 'cat-images', Videos: 'cat-videos', Audio: 'cat-audio',
+    Images: 'cat-images', Video: 'cat-videos', Audio: 'cat-audio',
     Documents: 'cat-documents', Code: 'cat-code', Archives: 'cat-archives',
     Other: 'cat-other',
   };
@@ -134,7 +134,7 @@ function categoryClass(cat) {
 
 function categoryEmoji(cat) {
   const map = {
-    Images: '🖼', Videos: '🎬', Audio: '🎵', Documents: '📄',
+    Images: '🖼', Video: '🎬', Audio: '🎵', Documents: '📄',
     Code: '💻', Archives: '📦', Other: '📁',
   };
   return map[cat] || '📁';
@@ -144,8 +144,8 @@ function getCategory(file) {
   const extMap = {
     jpg:'Images',jpeg:'Images',png:'Images',gif:'Images',bmp:'Images',tiff:'Images',
     webp:'Images',heic:'Images',raw:'Images',cr2:'Images',nef:'Images',arw:'Images',
-    mp4:'Videos',mov:'Videos',avi:'Videos',mkv:'Videos',wmv:'Videos',flv:'Videos',
-    webm:'Videos',m4v:'Videos',
+    mp4:'Video',mov:'Video',avi:'Video',mkv:'Video',wmv:'Video',flv:'Video',
+    webm:'Video',m4v:'Video',
     mp3:'Audio',wav:'Audio',flac:'Audio',aac:'Audio',ogg:'Audio',m4a:'Audio',wma:'Audio',
     pdf:'Documents',doc:'Documents',docx:'Documents',xls:'Documents',xlsx:'Documents',
     ppt:'Documents',pptx:'Documents',odt:'Documents',ods:'Documents',
@@ -1511,7 +1511,7 @@ function openEditModal(idx) {
 
         '<div class="form-group"><label style="color:var(--text);font-size:13px">Category</label>' +
         '<select id="edit-rule-category" style="width:100%;padding:8px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--text)">' +
-        ['Images','Documents','Videos','Audio','Code','Archives','Other'].map(function(c) {
+        ['Images','Documents','Video','Audio','Code','Archives','Other'].map(function(c) {
             return '<option value="' + c + '"' + (rule.category === c ? ' selected' : '') + '>' + c + '</option>';
         }).join('') + '</select></div>' +
 
@@ -1623,7 +1623,7 @@ var COMMON_RULES = [
     { id: 'cr-1', name: 'Protected env files', category: 'Other', desc: 'Skips .env, .ini, .cfg, .toml files', filterType: 'extension', filterValues: 'env, ini, cfg, toml', action: 'skip', template: '{parent}/{name}.{ext}', tags: ['protected'] },
     { id: 'cr-2', name: 'Keep tagged files', category: 'Other', desc: 'Skips files with KEEP in the name', filterType: 'name_contains', filterValues: 'KEEP', action: 'skip', template: '{parent}/{name}.{ext}', tags: ['protected'] },
     { id: 'cr-3', name: 'Images', category: 'Images', desc: 'Moves jpg/jpeg/png/webp/heic/gif/bmp/tiff/raw', filterType: 'extension', filterValues: 'jpg, jpeg, png, webp, heic, gif, bmp, tiff, raw', action: 'move', template: 'Images/{name}.{ext}', tags: ['images'] },
-    { id: 'cr-4', name: 'Videos', category: 'Videos', desc: 'Moves mp4/mov/mkv/avi/webm/m4v', filterType: 'extension', filterValues: 'mp4, mov, mkv, avi, webm, m4v', action: 'move', template: 'Videos/{name}.{ext}', tags: ['videos'] },
+    { id: 'cr-4', name: 'Videos', category: 'Video', desc: 'Moves mp4/mov/mkv/avi/webm/m4v', filterType: 'extension', filterValues: 'mp4, mov, mkv, avi, webm, m4v', action: 'move', template: 'Video/{name}.{ext}', tags: ['videos'] },
     { id: 'cr-5', name: 'Documents', category: 'Documents', desc: 'Moves pdf/doc/docx/txt/md/rtf/odt/xlsx/xls/pptx/ppt', filterType: 'extension', filterValues: 'pdf, doc, docx, txt, md, rtf, odt, xlsx, xls, pptx, ppt', action: 'move', template: 'Documents/{name}.{ext}', tags: ['documents'] },
     { id: 'cr-6', name: 'Audio', category: 'Audio', desc: 'Moves mp3/wav/m4a/flac/aac/ogg', filterType: 'extension', filterValues: 'mp3, wav, m4a, flac, aac, ogg', action: 'move', template: 'Audio/{name}.{ext}', tags: ['audio'] },
     { id: 'cr-7', name: 'Code', category: 'Code', desc: 'Moves py/js/ts/java/c/cpp/cs/go/rs/sh/css/html/xml/yaml/json/sql', filterType: 'extension', filterValues: 'py, js, ts, java, c, cpp, cs, go, rs, sh, css, html, xml, yaml, json, sql', action: 'move', template: 'Code/{name}.{ext}', tags: ['code'] },
