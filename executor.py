@@ -48,13 +48,17 @@ def load_plan(plan_path: str) -> list:
 
 
 def validate_plan(plan: list) -> None:
-    """Validate all paths are absolute and actions are known."""
+    """Validate all paths are absolute and actions are known.
+    Note: unknown_review is handled as a no-op by the executor and does not reach here."""
     valid_actions = {"move", "delete", "skip"}
     errors = []
 
     for i, entry in enumerate(plan):
         action = entry.get("action")
         if action not in valid_actions:
+            # unknown_review was already filtered upstream but handle gracefully
+            if action == "unknown_review":
+                continue
             errors.append(f"[{i}] Unknown action: {action!r}")
             continue
 
@@ -149,6 +153,13 @@ class UndoLog:
                 self._payload["actions"].append({
                     "action": "skip",
                     "path": entry.get("path", ""),
+                    "status": "pending",
+                })
+            elif action == "unknown_review":
+                # Human-review items are no-ops in the executor
+                self._payload["actions"].append({
+                    "action": "unknown_review",
+                    "path": entry.get("src", entry.get("path", "")),
                     "status": "pending",
                 })
         self._flush()

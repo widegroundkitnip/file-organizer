@@ -27,21 +27,22 @@ class Action:
 
 
 def check_boundary_conflicts(actions: List[Action], parent_folders: List[str]) -> List[Action]:
-    """Check all actions against parent folder boundaries. Block cross-boundary moves/deletes."""
+    """Block only actual boundary crossings: source inside boundary → destination outside that boundary.
+    Within-boundary moves are allowed. Only move actions are checked."""
     for pf in parent_folders:
         pf_norm = os.path.normpath(pf)
+        pf_prefix = pf_norm + os.sep
         for action in actions:
-            if action.action not in ("move", "delete"):
+            if action.action != "move":
                 continue
-            target = action.dst if action.action == "move" else action.src
-            target_norm = os.path.normpath(target)
-            # Is target inside a parent boundary?
-            is_inside = target_norm.startswith(pf_norm + os.sep) or target_norm == pf_norm
-            # Is source inside a parent boundary?
             src_norm = os.path.normpath(action.src)
-            src_inside = src_norm.startswith(pf_norm + os.sep) or src_norm == pf_norm
+            dst_norm = os.path.normpath(action.dst)
+            # Source must be inside the boundary
+            src_inside = src_norm == pf_norm or src_norm.startswith(pf_prefix)
+            # Destination must be outside the boundary (not just inside a different one)
+            dst_outside = dst_norm != pf_norm and not dst_norm.startswith(pf_prefix)
 
-            if is_inside or src_inside:
+            if src_inside and dst_outside:
                 action.status = "blocked_boundary"
                 action.error_reason = f"Crosses parent boundary: {pf}"
     return actions
@@ -194,14 +195,20 @@ def plan_from_manifest(
 
     # RULE 2b: Project-safe scope enforcement
     if scope_mode == "project_safe_mode" and project_roots:
-        protected = {p["path"] for p in project_roots}
         for action in actions:
-            if action.src:
-                src_dir = os.path.dirname(action.src)
-                dst_dir = os.path.dirname(action.dst)
-                if src_dir not in protected and any(dst_dir.startswith(p) for p in protected if dst_dir.startswith(p)):
+            if action.action != "move" or not action.src:
+                continue
+            src_norm = os.path.normpath(action.src)
+            dst_norm = os.path.normpath(action.dst)
+            for proj in project_roots:
+                proj_path = os.path.normpath(proj["path"])
+                proj_prefix = proj_path + os.sep
+                # Block if src is inside the project root and dst is outside it
+                if (src_norm == proj_path or src_norm.startswith(proj_prefix)) and \
+                   (dst_norm != proj_path and not dst_norm.startswith(proj_prefix)):
                     action.blocked = True
                     action.blocked_reason = "project_safe_mode: would move file out of detected project"
+                    break
 
     # RULE 3: Unknown file enforcement (double-check, already applied above)
     actions = check_unknown_files(files, actions)
