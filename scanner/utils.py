@@ -11,7 +11,7 @@ UNKNOWN_EXTENSIONS: Set[str] = {".log"}
 
 def classify_file(name: str, ext: str) -> str:
     """Return 'system', 'unknown', or 'known'"""
-    if not ext or ext.lower() in SYSTEM_EXTENSIONS:
+    if ext.lower() in SYSTEM_EXTENSIONS:
         return "system"
     if ext.lower() in UNKNOWN_EXTENSIONS or not ext:
         return "unknown"
