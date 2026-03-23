@@ -1754,10 +1754,8 @@ function selectProfile(profileId) {
             : "rgba(255,255,255,0.04)";
     });
     updateIntentScopeVisibility();
-}
-
-function updateIntentScopeVisibility() {
-    // Intent/scope are always visible; profile just pre-populates rules
+    // BUG-013/014: calling generateProfileRules on profile selection and showing results
+    generateProfileRules(profileId);
 }
 
 async function generateProfileRules(profileId) {
@@ -1766,7 +1764,9 @@ async function generateProfileRules(profileId) {
         if (res.count > 0) {
             await loadRules();
             renderRules();
-            showAlert("rules-alert", "success", res.count + " rule(s) from profile added (disabled — enable what you want).");
+            showAlert("rules-alert", "info",
+                "Profile rules added (" + res.count + ") — <strong>disabled by default</strong>. Go to Rules to enable what you need before previewing."
+            );
         }
     } catch(e) {
         console.error("generateProfileRules failed", e);
