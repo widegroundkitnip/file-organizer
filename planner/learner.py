@@ -25,3 +25,7 @@ def suggest(n: int = 5):
         if count < 3: continue
         out.append({"ext": ext, "action": action, "confidence": min(count/10, 1.0), "count": count})
     return out
+
+# Required aliases
+log_approved_action = log_approved
+suggest_rules = suggest
