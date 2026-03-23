@@ -21,6 +21,8 @@ const state = {
   filter: 'all',
 };
 
+window.lastCrossPathData = null;
+
 // ---------------------------------------------------------------------------
 // Navigation
 // ---------------------------------------------------------------------------
@@ -40,8 +42,65 @@ function navigate(page) {
   if (page === 'preview' && state.manifest)  renderPreview();
   if (page === 'execute')                    renderExecution();
   if (page === 'settings')                   renderSettings();
-  if (page === "structure") { document.getElementById("structure-issues").innerHTML = "<div class=\"alert alert-info\">Run a Cross-Path scan first to see structure analysis.</div>"; }
-  if (page === "unknown") { document.getElementById("unknown-files").innerHTML = "<div class=\"alert alert-info\">Run a Cross-Path scan first to see unknown files.</div>"; }
+  if (page === "structure") {
+    const data = window.lastCrossPathData;
+    const el = document.getElementById("structure-issues");
+    if (!data || !data.structure) {
+      el.innerHTML = "<div class=\"alert alert-info\">Run a Cross-Path scan first to see structure analysis.</div>";
+    } else {
+      const s = data.structure;
+      let html = "";
+      if (s.issues && s.issues.length > 0) {
+        html += "<div style=\"margin-bottom:12px\">";
+        s.issues.forEach(function(issue) { html += "<div style=\"color:var(--warning);padding:4px 0\">" + escHtml(issue) + "</div>"; });
+        html += "</div>";
+      } else {
+        html = "<div class=\"alert alert-success\">No structural issues found.</div>";
+      }
+      if (s.depth) html += "<div style=\"color:var(--text);font-size:13px;margin-top:8px\">Max depth: " + s.depth + " | Total folders: " + (s.total_folders || "N/A") + "</div>";
+      el.innerHTML = html;
+    }
+  }
+  if (page === "unknown") {
+    const data = window.lastCrossPathData;
+    const el = document.getElementById("unknown-files");
+    if (!data || !data.unknown_files || data.unknown_files.length === 0) {
+      el.innerHTML = "<div class=\"alert alert-info\">Run a Cross-Path scan first to see unknown files.</div>";
+    } else {
+      var files = data.unknown_files;
+      var html = "<div style=\"margin-bottom:12px;color:var(--text)\">" + files.length + " unknown file(s) (" + data.unknown_count + " total)</div>";
+      files.forEach(function(f) {
+        html += "<div style=\"padding:6px 0;border-bottom:1px solid #222;font-size:13px;word-break:break-all\">";
+        html += "<span style=\"color:var(--text)\">" + escHtml(f.path) + "</span>";
+        html += " <span style=\"color:#666\">" + fmtSize(f.size) + "</span>";
+        html += "</div>";
+      });
+      el.innerHTML = html;
+    }
+  }
+  if (page === "duplicates") {
+    const data = window.lastCrossPathData;
+    const el = document.getElementById("dupe-groups");
+    if (!data || !data.duplicates || data.duplicates.length === 0) {
+      el.innerHTML = "<div class=\"alert alert-info\">Run a Cross-Path scan first to see duplicates.</div>";
+    } else {
+      var dupGroups = data.duplicates;
+      var html = "<div style=\"margin-bottom:16px;color:var(--text)\"><strong>" + dupGroups.length + "</strong> duplicate group(s)</div>";
+      dupGroups.forEach(function(group, idx) {
+        var tier = group.tier || "likely";
+        html += "<div class=\"dupe-group\" data-tier=\"" + escHtml(tier) + "\" style=\"background:var(--surface);border:1px solid #333;border-radius:8px;padding:12px;margin-bottom:12px\">";
+        html += "<div style=\"color:var(--warning);margin-bottom:8px\">Group " + (idx+1) + " -- " + group.files.length + " files</div>";
+        group.files.forEach(function(f) {
+          html += "<div style=\"padding:4px 0;border-bottom:1px solid #222;font-size:13px;word-break:break-all\">";
+          html += "<span style=\"color:var(--text)\">" + escHtml(f.path) + "</span>";
+          html += " <span style=\"color:#666\">" + fmtSize(f.size) + "</span>";
+          html += "</div>";
+        });
+        html += "</div>";
+      });
+      el.innerHTML = html;
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -938,6 +997,7 @@ async function runCrossPathScan() {
   }
   try {
     const data = await api("POST", "/scan/multi", { paths, mode: "basic", include_hidden: false, exclude_dirs: [] });
+    window.lastCrossPathData = data;
     const dupGroups = data.duplicates || [];
     if (dupGroups.length === 0) {
       resultsDiv.innerHTML = "<div class=\"alert alert-success\">No duplicates found across the selected folders.</div>";
