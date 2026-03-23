@@ -82,8 +82,12 @@ class ExtendedManifestBuilder:
     def _scan_single(self, root: str, parent_tree: str):
         root = normalize_path(root)
         for dirpath, dirnames, filenames in os.walk(root, followlinks=self.follow_symlinks):
-            # Filter excluded dirs in-place
-            dirnames[:] = [d for d in dirnames if not self._should_exclude_dir(d)]
+            # Filter hidden dirs and excluded dirs in-place
+            dirnames[:] = [
+                d for d in dirnames
+                if not (d.startswith(".") and not self.include_hidden)
+                and not self._should_exclude_dir(d)
+            ]
             rel_dir = get_relative_path(dirpath, root)
             depth = rel_dir.count("/") + (1 if rel_dir else 0)
             for name in filenames:
