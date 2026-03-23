@@ -40,7 +40,8 @@ def apply_template(template: str, file: dict, default_category: str = "Other") -
     name = file.get("name", "")
     ext = file.get("ext", "")
     name_no_ext = os.path.splitext(name)[0]
-    category = CATEGORY_MAP.get(file.get("category", "other"), "Other")
+    file_category = file.get("category", "other")
+    category = CATEGORY_MAP.get(file_category, default_category)
 
     # Parse modified date
     modified_str = file.get("modified_ts", "")
