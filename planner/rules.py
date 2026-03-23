@@ -60,7 +60,7 @@ class FilterCondition:
         elif self.type == "duplicate":
             # Files that are duplicates (flagged in manifest)
             return file.get("is_duplicate", False)
-        return False
+        raise ValueError(f"Unknown filter type: {self.type}")
 
 
 @dataclass

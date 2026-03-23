@@ -1726,12 +1726,12 @@ async function loadProfiles() {
         if (!container) return;
 
         container.innerHTML = profiles.map(function(p) {
-            return '<button class="profile-card" data-profile="' + p.id + '" onclick="selectProfile(\'' + p.id + '\')" ' +
-                'title="' + p.description + '" style="' +
+            return '<button class="profile-card" data-profile="' + escHtml(p.id) + '" onclick="selectProfile(\'' + escHtml(p.id) + '\')" ' +
+                'title="' + escHtml(p.description) + '" style="' +
                 'display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);' +
                 'background:rgba(255,255,255,0.04);cursor:pointer;font-size:13px;color:var(--text);transition:all 0.15s">' +
                 '<span style="font-size:16px">' + p.icon + '</span>' +
-                '<span>' + p.name + '</span>' +
+                '<span>' + escHtml(p.name) + '</span>' +
                 '</button>';
         }).join("");
 
