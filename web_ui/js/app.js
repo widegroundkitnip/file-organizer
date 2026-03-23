@@ -70,7 +70,7 @@ function navigate(page) {
       var html = "<div style=\"margin-bottom:16px;color:var(--text)\"><strong>" + dupGroups.length + "</strong> duplicate group(s)</div>";
       dupGroups.forEach(function(group, idx) {
         var tier = group.tier || "likely";
-        html += "<div class=\"dupe-group\" data-tier=\"" + escHtml(tier) + "\" style=\"background:var(--surface);border:1px solid #333;border-radius:8px;padding:12px;margin-bottom:12px\">";
+        html += "<div class=\"duplicate-group\" data-tier=\"" + escHtml(tier) + "\" style=\"background:var(--surface);border:1px solid #333;border-radius:8px;padding:12px;margin-bottom:12px\">";
         html += "<div style=\"color:var(--warning);margin-bottom:8px\">Group " + (idx+1) + " -- " + group.files.length + " files</div>";
         group.files.forEach(function(f) {
           html += "<div style=\"padding:4px 0;border-bottom:1px solid #222;font-size:13px;word-break:break-all\">";
@@ -953,6 +953,24 @@ async function init() {
 document.addEventListener('DOMContentLoaded', init);
 
 // Cross-Path Scan
+let crosspathPollCount = 0;
+
+function pollCrossPathProgress() {
+  crosspathPollCount = 0;
+  (function poll() {
+    api("GET", "/api/scans").then(function(scans) {
+      var latest = scans[0];
+      var statusEl = document.getElementById("crosspath-status");
+      if (latest && statusEl) {
+        statusEl.textContent = "Scanning… " + latest.total_files.toLocaleString() + " files checked";
+      }
+    }).catch(function(){});
+    if (crosspathPollCount < 60) {
+      crosspathPollCount++;
+      setTimeout(poll, 1000);
+    }
+  })();
+}
 let crosspathInputCount = 1;
 
 function addPathInput() {
@@ -969,7 +987,7 @@ function addPathInput() {
 
 async function runCrossPathScan() {
   const resultsDiv = document.getElementById("crosspath-results");
-  resultsDiv.innerHTML = "<div class=\"spinner\"></div> Scanning...";
+  resultsDiv.innerHTML = "<div class=\"spinner\"></div> <span id=\"crosspath-status\">Preparing scan…</span>";
   const paths = [];
   for (let i = 0; i < crosspathInputCount; i++) {
     const el = document.getElementById("crosspath-input-" + i);
@@ -980,7 +998,10 @@ async function runCrossPathScan() {
     return;
   }
   try {
-    const data = await api("POST", "/api/scan/multi", { paths, mode: "deep", include_hidden: false, exclude_dirs: [] });
+    // Start scan and poll for progress in parallel
+    const scanPromise = api("POST", "/api/scan/multi", { paths, mode: "deep", include_hidden: false, exclude_dirs: [] });
+    pollCrossPathProgress();
+    const data = await scanPromise;
     window.lastCrossPathData = data;
     const tier1 = data.tier1 || [];
     const tier2 = data.tier2 || [];
@@ -994,7 +1015,7 @@ async function runCrossPathScan() {
       if (tier1.length > 0) {
         html += "<div style=\"margin-top:12px\"><strong style=\"color:var(--text)\">Exact (Tier 1): " + tier1.length + " groups</strong></div>";
         tier1.forEach(function(group, idx) {
-          html += "<div class=\"duplicate-group\" style=\"background:var(--surface);border:1px solid #333;border-radius:8px;padding:12px;margin-top:8px\">";
+          html += "<div class=\"duplicate-group\" data-tier=\"exact\" style=\"background:var(--surface);border:1px solid #333;border-radius:8px;padding:12px;margin-top:8px\">";
           html += "<div style=\"color:var(--warning);margin-bottom:8px\">Group " + (idx+1) + " -- " + group.files.length + " files</div>";
           group.files.forEach(function(f) {
             html += "<div style=\"padding:4px 0;border-bottom:1px solid #222;font-size:13px;word-break:break-all\">" + escHtml(f.path) + " <span style=\"color:#666\">" + fmtSize(f.size) + "</span></div>";
@@ -1006,7 +1027,7 @@ async function runCrossPathScan() {
       if (tier2.length > 0) {
         html += "<div style=\"margin-top:24px\"><strong style=\"color:var(--text)\">Likely (Tier 2): " + tier2.length + " groups</strong></div>";
         tier2.forEach(function(group, idx) {
-          html += "<div class=\"duplicate-group\" style=\"background:var(--surface);border:1px solid #333;border-radius:8px;padding:12px;margin-top:8px\">";
+          html += "<div class=\"duplicate-group\" data-tier=\"likely\" style=\"background:var(--surface);border:1px solid #333;border-radius:8px;padding:12px;margin-top:8px\">";
           html += "<div style=\"color:var(--warning);margin-bottom:8px\">Group " + (idx+1) + " -- " + group.files.length + " files</div>";
           group.files.forEach(function(f) {
             html += "<div style=\"padding:4px 0;border-bottom:1px solid #222;font-size:13px;word-break:break-all\">" + escHtml(f.path) + " <span style=\"color:#666\">" + fmtSize(f.size) + "</span></div>";
@@ -1020,7 +1041,7 @@ async function runCrossPathScan() {
         html += "<div style=\"margin-top:24px\"><strong style=\"color:var(--text)\">Similar (Tier 3): " + data.tier3.length + " groups</strong></div>";
         data.tier3.forEach(function(group, idx) {
           var pct = Math.round(group.similarity * 100);
-          html += "<div class=\"duplicate-group\" style=\"background:var(--surface);border:1px solid #333;border-radius:8px;padding:12px;margin-top:8px\">";
+          html += "<div class=\"duplicate-group\" data-tier=\"similar\" style=\"background:var(--surface);border:1px solid #333;border-radius:8px;padding:12px;margin-top:8px\">";
           html += "<div style=\"color:var(--info);margin-bottom:8px\">Group " + (idx+1) + " (" + pct + "% similar) -- " + group.files.length + " files</div>";
           group.files.forEach(function(f) {
             html += "<div style=\"padding:4px 0;border-bottom:1px solid #222;font-size:13px;word-break:break-all\">" + escHtml(f.path) + " <span style=\"color:#666\">" + fmtSize(f.size) + "</span></div>";
@@ -1052,8 +1073,9 @@ function filterDupes(tier) {
   document.querySelectorAll(".filter-btn").forEach(function(b){ b.classList.remove("active"); });
   var btn = document.querySelector(".filter-btn[data-tier=\""+tier+"\"]");
   if (btn) btn.classList.add("active");
-  document.querySelectorAll(".dupe-group").forEach(function(el) {
-    el.style.display = (tier === "all" || el.dataset.tier === tier) ? "block" : "none";
+  document.querySelectorAll(".duplicate-group").forEach(function(el) {
+    var t = el.getAttribute ? el.getAttribute('data-tier') : el.dataset.tier;
+    el.style.display = (tier === "all" || t === tier) ? "block" : "none";
   });
 }
 
