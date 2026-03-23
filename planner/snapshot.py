@@ -3,8 +3,9 @@ import hashlib
 import os
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
-SNAPSHOT_DIR = Path("data/snapshots")
+SNAPSHOT_DIR = Path(__file__).parent.parent / "data" / "snapshots"
 SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
 def create_snapshot(manifest: dict, plan: dict, rules: list, profile_id: str = None) -> str:
@@ -40,6 +41,13 @@ def create_snapshot(manifest: dict, plan: dict, rules: list, profile_id: str = N
     path = SNAPSHOT_DIR / f"{snapshot_id}.json"
     with open(path, "w") as f:
         json.dump(snap, f, indent=2)
+
+    # Also save the plan so verify_plan can load it later
+    if plan:
+        plan_path = SNAPSHOT_DIR / f"{snapshot_id}_plan.json"
+        with open(plan_path, "w") as f:
+            json.dump(plan, f)
+
     return snapshot_id
 
 def get_snapshot(snapshot_id: str) -> dict:
@@ -49,20 +57,103 @@ def get_snapshot(snapshot_id: str) -> dict:
     with open(path) as f:
         return json.load(f)
 
-def verify_plan(snapshot_id: str, after_manifest: dict) -> dict:
+def verify_plan(snapshot_id: str, after_manifest: dict, plan: Optional[dict] = None) -> dict:
+    """
+    Verify a plan against actual filesystem state post-execution.
+
+    Compares planned actions (move/delete/skip) against the actual
+    state of files recorded in after_manifest (a post-execution scan).
+    """
     snap = get_snapshot(snapshot_id)
     if not snap:
         return {"error": "Snapshot not found"}
 
-    result = {
+    # Load the plan if not provided (look it up from snapshot if stored)
+    if plan is None:
+        plan_path = SNAPSHOT_DIR / f"{snapshot_id}_plan.json"
+        if plan_path.exists():
+            with open(plan_path) as f:
+                plan = json.load(f)
+        else:
+            plan = {}
+
+    actions = plan.get("actions", []) if isinstance(plan, dict) else (plan or [])
+
+    # Build a set of paths from the after-manifest for fast lookup
+    after_paths: dict[str, dict] = {}
+    for f in after_manifest.get("files", []):
+        p = f.get("path")
+        if p:
+            after_paths[p] = f
+
+    moved_ok = 0
+    deleted_ok = 0
+    unchanged_ok = 0
+    blocked_ok = 0
+    unexpected: list[dict] = []
+
+    for action in actions:
+        act = action.get("action", "")
+        src = action.get("src") or action.get("path", "")
+        dst = action.get("dst", "")
+
+        if act in ("skip", "blocked") or action.get("status") in ("skipped_no_rule", "blocked_boundary", "blocked"):
+            # Files that should remain unchanged
+            if src in after_paths:
+                unchanged_ok += 1
+            else:
+                # File missing when it should be unchanged — unexpected
+                unexpected.append({
+                    "type": "should_exist",
+                    "path": src,
+                    "expected": "unchanged",
+                    "found": "absent",
+                    "action": act,
+                })
+        elif act == "move":
+            # For moves: source should be gone, destination should exist
+            src_gone = src not in after_paths
+            dst_exists = dst in after_paths
+            if src_gone and dst_exists:
+                moved_ok += 1
+            elif src_gone and not dst_exists:
+                # Moved but destination not found where expected
+                unexpected.append({
+                    "type": "move_incomplete",
+                    "src": src,
+                    "dst": dst,
+                    "expected": "file at dst",
+                    "found": "absent",
+                })
+            elif not src_gone:
+                # Source still exists — move didn't happen
+                unexpected.append({
+                    "type": "move_not_executed",
+                    "src": src,
+                    "dst": dst,
+                    "expected": "src removed",
+                    "found": "src still present",
+                })
+        elif act == "delete":
+            # For deletes: source should be gone
+            if src not in after_paths:
+                deleted_ok += 1
+            else:
+                unexpected.append({
+                    "type": "delete_not_executed",
+                    "path": src,
+                    "expected": "absent",
+                    "found": "present",
+                })
+
+    return {
         "snapshot_id": snapshot_id,
-        "planned_actions": snap["plan_actions"],
-        "scanned_paths": snap["scanned_paths"],
-        "planned_files": snap["file_count"],
-        "moved_as_expected": 0,
-        "deleted_as_expected": 0,
-        "unchanged_as_expected": 0,
-        "blocked_as_expected": 0,
-        "unexpected_changes": [],
+        "planned_actions": len(actions),
+        "scanned_paths": snap.get("scanned_paths", []),
+        "planned_files": snap.get("file_count", 0),
+        "moved_as_expected": moved_ok,
+        "deleted_as_expected": deleted_ok,
+        "unchanged_as_expected": unchanged_ok,
+        "blocked_as_expected": blocked_ok,
+        "unexpected_changes": unexpected,
     }
-    return result

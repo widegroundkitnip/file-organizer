@@ -76,6 +76,9 @@ def find_similar_duplicates(
                 name2 = f2.get("name", "")
                 size1 = f1.get("size", f1.get("size_bytes", 0))
                 size2 = f2.get("size", f2.get("size_bytes", 0))
+                # Skip zero-size files — they are always identical and carry no meaning
+                if size1 == 0 or size2 == 0:
+                    continue
                 sim = filename_similarity(name1, name2)
                 size_ok = size_similar(size1, size2, size_tolerance)
 
@@ -148,11 +151,12 @@ class CrossPathDuplicateFinder:
         return f[attr] if isinstance(f, dict) else getattr(f, attr)
 
     def _find_exact(self):
-        """Tier 1: same hash (SHA256)."""
+        """Tier 1: same hash (SHA256). Skip zero-size files."""
         by_hash = defaultdict(list)
         for f in self.files:
             h = self._get(f, "hash")
-            if h:
+            size = self._get(f, "size_bytes")
+            if h and size > 0:
                 by_hash[h].append(f)
         gid = len(self.groups)
         for h, group_files in by_hash.items():
@@ -164,12 +168,13 @@ class CrossPathDuplicateFinder:
             gid += 1
 
     def _find_likely(self):
-        """Tier 2: same name + same size, no hash."""
+        """Tier 2: same name + same size, no hash (skip zero-size files)."""
         by_name_size = defaultdict(list)
         for f in self.files:
             h = self._get(f, "hash")
             cls = self._get(f, "classification")
-            if not h and cls == "known":
+            size = self._get(f, "size_bytes")
+            if not h and cls == "known" and size > 0:
                 key = (self._get(f, "name"), self._get(f, "size_bytes"))
                 by_name_size[key].append(f)
         gid = len(self.groups)

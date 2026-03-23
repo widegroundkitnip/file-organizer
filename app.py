@@ -15,6 +15,8 @@ Port: 3001
 
 from __future__ import annotations
 
+import threading
+
 import hashlib
 import json
 import logging
@@ -54,6 +56,20 @@ SCANS_DIR = BASE_DIR / "scans"
 SCANS_DIR.mkdir(exist_ok=True)
 
 app = FastAPI(title="File Organizer & Deduper", version="3.0.0")
+
+# In-progress scan state (used by /api/scan/status)
+_scan_progress_state = {
+    "running": False,
+    "phase": "idle",
+    "current_path": "",
+    "files_found": 0,
+    "manifest_path": None,
+    "manifest_id": None,
+    "total_files": 0,
+    "error": None,
+    "cancel_event": None,
+}
+_scan_progress_lock = threading.Lock()
 
 # CORS — local dev, allow all
 app.add_middleware(
@@ -132,9 +148,28 @@ class SettingsUpdate(BaseModel):
 @app.post("/api/scan")
 async def api_scan(req: ScanRequest):
     """Run organizer.py scan via subprocess."""
+    global _scan_progress_state
+
     path = os.path.expanduser(req.path)
     if not os.path.isdir(path):
         raise HTTPException(status_code=400, detail=f"Not a directory: {path}")
+
+    # Check if a scan is already running
+    with _scan_progress_lock:
+        if _scan_progress_state["running"]:
+            raise HTTPException(status_code=409, detail="A scan is already in progress")
+        cancel_event = threading.Event()
+        _scan_progress_state = {
+            "running": True,
+            "phase": "walking",
+            "current_path": path,
+            "files_found": 0,
+            "manifest_path": None,
+            "manifest_id": None,
+            "total_files": 0,
+            "error": None,
+            "cancel_event": cancel_event,
+        }
 
     timestamp_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d_%H%M%S")
     manifest_filename = f"scan_{timestamp_str}.json"
@@ -157,11 +192,23 @@ async def api_scan(req: ScanRequest):
             timeout=300,
         )
     except subprocess.TimeoutExpired:
+        with _scan_progress_lock:
+            _scan_progress_state["running"] = False
+            _scan_progress_state["phase"] = "done"
+            _scan_progress_state["error"] = "Scan timed out (300s)"
         raise HTTPException(status_code=504, detail="Scan timed out (300s)")
     except Exception as e:
+        with _scan_progress_lock:
+            _scan_progress_state["running"] = False
+            _scan_progress_state["phase"] = "done"
+            _scan_progress_state["error"] = str(e)
         raise HTTPException(status_code=500, detail=f"Scan error: {e}")
 
     if result.returncode != 0:
+        with _scan_progress_lock:
+            _scan_progress_state["running"] = False
+            _scan_progress_state["phase"] = "done"
+            _scan_progress_state["error"] = result.stderr or result.stdout
         raise HTTPException(
             status_code=500,
             detail=f"Scan failed: {result.stderr or result.stdout}"
@@ -170,6 +217,10 @@ async def api_scan(req: ScanRequest):
     # Find the actual output file (organizer.py uses timestamp in filename)
     scan_files = sorted(SCANS_DIR.glob("scan_*.json"))
     if not scan_files:
+        with _scan_progress_lock:
+            _scan_progress_state["running"] = False
+            _scan_progress_state["phase"] = "done"
+            _scan_progress_state["error"] = "No manifest produced"
         raise HTTPException(status_code=500, detail="Scan produced no manifest")
     latest = scan_files[-1]
 
@@ -181,12 +232,51 @@ async def api_scan(req: ScanRequest):
     except Exception:
         total_files = 0
 
+    with _scan_progress_lock:
+        _scan_progress_state["running"] = False
+        _scan_progress_state["phase"] = "done"
+        _scan_progress_state["total_files"] = total_files
+        _scan_progress_state["manifest_path"] = str(latest)
+        _scan_progress_state["manifest_id"] = latest.stem
+
     return {
         "status": "ok",
         "manifest_path": str(latest),
         "manifest_id": latest.stem,  # e.g. scan_2024-01-15_120000
         "total_files": total_files,
     }
+
+
+@app.get("/api/scan/status")
+async def api_scan_status():
+    """Return current scan progress. Returns 200 even when no scan is running."""
+    with _scan_progress_lock:
+        state = dict(_scan_progress_state)
+    # Don't expose the cancel event in the response
+    response = {
+        "running": state["running"],
+        "phase": state["phase"],
+        "current_path": state["current_path"],
+        "files_found": state["files_found"],
+        "total_files": state["total_files"],
+        "manifest_path": state["manifest_path"],
+        "manifest_id": state["manifest_id"],
+        "error": state["error"],
+    }
+    return response
+
+
+@app.post("/api/scan/cancel")
+async def api_scan_cancel():
+    """Cancel the currently running scan."""
+    with _scan_progress_lock:
+        state = dict(_scan_progress_state)
+    if not state["running"]:
+        return {"ok": False, "reason": "No scan in progress"}
+    cancel_event = state.get("cancel_event")
+    if cancel_event:
+        cancel_event.set()
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------
@@ -736,7 +826,13 @@ async def api_get_snapshot(snapshot_id: str):
 @app.post("/api/snapshot/{snapshot_id}/verify")
 async def api_verify_snapshot(snapshot_id: str, req: dict):
     from planner.snapshot import verify_plan
-    result = verify_plan(snapshot_id, req.get("after_manifest", {}))
+    # Pass the plan if provided in the request body; otherwise verify_plan
+    # will try to load it from the saved _plan.json file
+    result = verify_plan(
+        snapshot_id,
+        req.get("after_manifest", {}),
+        plan=req.get("plan"),
+    )
     return result
 
 
@@ -746,15 +842,34 @@ async def api_verify_snapshot(snapshot_id: str, req: dict):
 
 @app.get("/api/open-folder")
 async def api_open_folder(path: str):
-    """Open the containing folder of the given path in the OS file manager."""
+    """Open the containing folder of the given path in the OS file manager.
+
+    If path is a file: opens the parent directory.
+    If path is a directory: opens that directory directly.
+    Works even if the path doesn't exist (uses the parent).
+    """
     if not path:
         raise HTTPException(400, detail="path query parameter required")
 
     file_path = os.path.expanduser(path)
-    if not os.path.exists(file_path):
-        raise HTTPException(404, detail=f"Path not found: {path}")
+    abs_path = os.path.abspath(file_path)
 
-    folder = os.path.dirname(file_path) or file_path
+    # Always try to open the folder — even for non-existent paths.
+    # If the path itself exists as a dir, open it directly.
+    # Otherwise try to open its parent (covers non-existent files).
+    if os.path.isdir(abs_path):
+        folder = abs_path
+    elif os.path.exists(abs_path) and (os.path.isfile(abs_path) or os.path.islink(abs_path)):
+        folder = os.path.dirname(abs_path)
+        if not folder:
+            folder = abs_path
+    else:
+        # Path doesn't exist or is unknown type: open its parent directory
+        folder = os.path.dirname(abs_path)
+        if not folder:
+            folder = abs_path
+
+    folder = os.path.normpath(folder) or abs_path
     system = platform.system()
 
     try:

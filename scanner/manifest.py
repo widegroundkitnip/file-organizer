@@ -48,7 +48,9 @@ class ExtendedManifestBuilder:
                  include_hidden: bool = False,
                  exclude_dirs: Optional[List[str]] = None,
                  hash_cache: Optional[dict] = None,
-                 follow_symlinks: bool = False):
+                 follow_symlinks: bool = False,
+                 progress_callback: Optional[callable] = None,
+                 cancel_event: Optional[threading.Event] = None):
         self.paths = [normalize_path(p) for p in paths]
         self.mode = mode
         self.include_hidden = include_hidden
@@ -60,15 +62,46 @@ class ExtendedManifestBuilder:
             self.exclude_dirs = set(exclude_dirs)
         self.hash_cache = hash_cache or {}  # path -> hash
         self.follow_symlinks = follow_symlinks
+        self.progress_callback = progress_callback
+        self.cancel_event = cancel_event or threading.Event()
         self.files: List[ScannedFile] = []
         self._file_count = 0
         self._total_size = 0
         self._lock = threading.Lock()
+        # Current status for progress reporting
+        self._current_path = ""
+        self._phase = "idle"  # idle | walking | hashing | done | cancelled
 
     def scan(self) -> dict:
+        self._phase = "walking"
         for path in self.paths:
+            if self.cancel_event.is_set():
+                self._phase = "cancelled"
+                break
+            self._current_path = path
+            self._report_progress("walking", path, 0)
             self._scan_single(path, parent_tree=self._get_tree_name(path))
+
+        if self.mode == "deep" and not self.cancel_event.is_set():
+            self._phase = "hashing"
+            self._report_progress("hashing", "", self._file_count)
+
+        self._phase = "done"
+        self._report_progress("done", "", self._file_count)
         return self._build_manifest()
+
+    def _report_progress(self, phase: str, current_path: str, files_done: int):
+        if self.progress_callback:
+            try:
+                self.progress_callback({
+                    "phase": phase,
+                    "current_path": current_path,
+                    "files_found": self._file_count,
+                    "files_done": files_done,
+                    "cancelled": self.cancel_event.is_set(),
+                })
+            except Exception:
+                pass
 
     def _get_tree_name(self, path: str) -> str:
         """Get a readable name for this scan root."""
@@ -79,7 +112,12 @@ class ExtendedManifestBuilder:
 
     def _scan_single(self, root: str, parent_tree: str):
         root = normalize_path(root)
+        dirs_checked = 0
         for dirpath, dirnames, filenames in os.walk(root, followlinks=self.follow_symlinks):
+            # Check cancellation periodically (every ~50 directories)
+            if dirs_checked % 50 == 0 and self.cancel_event.is_set():
+                return
+            dirs_checked += 1
             # Filter hidden dirs and excluded dirs in-place
             dirnames[:] = [
                 d for d in dirnames
