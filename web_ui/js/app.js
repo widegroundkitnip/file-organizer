@@ -426,16 +426,27 @@ function renderRules() {
   container.innerHTML = state.rules.map((rule, idx) => {
     const flt = rule.filter || {};
     const filterDesc = flt.type === 'extension'     ? `Extension: .${(flt.values||[]).join(', .')}` :
-                       flt.type === 'name_contains'  ? `Name contains: ${flt.value || ''}` :
+                       flt.type === 'name_contains'  ? `Name contains: ${Array.isArray(flt.values) ? flt.values.join(', ') : (flt.value || '')}` :
+                       flt.type === 'path_contains'   ? `Path contains: ${Array.isArray(flt.values) ? flt.values.join(', ') : (flt.value || '')}` :
                        flt.type === 'name_pattern'   ? `Pattern: ${flt.value || ''}` :
                        flt.type === 'size_gt'        ? `Size > ${fmtSize(flt.value)}` :
                        flt.type === 'size_lt'        ? `Size < ${fmtSize(flt.value)}` :
+                       flt.type === 'created_before' ? `Created before: ${flt.value || ''}` :
+                       flt.type === 'created_after'  ? `Created after: ${flt.value || ''}` :
+                       flt.type === 'modified_before' ? `Modified before: ${flt.value || ''}` :
+                       flt.type === 'modified_after'  ? `Modified after: ${flt.value || ''}` :
+                       flt.type === 'modified_within_days' ? `Modified within ${flt.value} days` :
+                       flt.type === 'no_extension'   ? `No extension` :
+                       flt.type === 'duplicate'      ? `Duplicate` :
                        flt.type || 'No filter';
+    const actionBadge = rule.action === 'delete' ? 'badge-delete' : rule.action === 'skip' ? 'badge-skip' : 'badge-move';
+    const actionLabel = rule.action === 'delete' ? '🗑 Delete' : rule.action === 'skip' ? '— Skip' : '→ Move';
     return `
       <div class="rule-card" data-idx="${idx}">
         <div class="rule-card-header">
           <span class="rule-handle">⠿</span>
           <span class="rule-name">${escHtml(rule.name || 'Unnamed rule')}</span>
+          <span class="${actionBadge}" style="font-size:11px;padding:2px 6px;border-radius:4px;font-weight:bold">${actionLabel}</span>
           <span class="category-tag ${categoryClass(rule.category || 'Other')}">${escHtml(rule.category || 'Other')}</span>
           <label class="checkbox-label" style="flex-shrink:0">
             <input type="checkbox" ${rule.enabled !== false ? 'checked' : ''} onchange="toggleRule(${idx}, this.checked)">
@@ -460,6 +471,7 @@ function addRule() {
   const name = document.getElementById('new-rule-name')?.value?.trim() || 'New Rule';
   const filterType = document.getElementById('new-filter-type')?.value || 'extension';
   const filterValue = document.getElementById('new-filter-value')?.value?.trim() || '';
+  const actionType = document.getElementById('new-action-type')?.value || 'move';
   const category = document.getElementById('new-rule-category')?.value || 'Other';
   const subfolder = document.getElementById('new-rule-subfolder')?.value?.trim() || '';
   const template = document.getElementById('new-rule-template')?.value?.trim()
@@ -468,12 +480,19 @@ function addRule() {
   const filter = { type: filterType };
   if (filterType === 'extension') {
     filter.values = filterValue.split(',').map(v => v.trim().replace(/^\./, '')).filter(Boolean);
-  } else {
+  } else if (filterType === 'name_contains' || filterType === 'path_contains') {
+    // B-7: name_contains and path_contains use array of values
+    filter.values = filterValue.split(',').map(v => v.trim()).filter(Boolean);
+  } else if (filterType === 'no_extension' || filterType === 'duplicate') {
+    // These take no value
+    filter.value = null;
+  } else if (filterType) {
     filter.value = filterValue;
   }
 
   const rule = {
     name,
+    action: actionType,
     category,
     subfolder,
     filter,
@@ -519,23 +538,43 @@ function updateFilterValueLabel() {
   const type = document.getElementById('new-filter-type')?.value;
   const label = document.getElementById('filter-value-label');
   const hint = document.getElementById('filter-value-hint');
+  const valueInput = document.getElementById('new-filter-value');
   if (!label) return;
   const labels = {
     extension: 'Extensions (comma-separated)',
-    name_contains: 'Substring to match',
+    name_contains: 'Substrings (comma-separated)',
     name_pattern: 'Glob pattern (e.g. invoice_*)',
     size_gt: 'Minimum size in bytes',
     size_lt: 'Maximum size in bytes',
+    created_before: 'Created before (YYYY-MM-DD)',
+    created_after: 'Created after (YYYY-MM-DD)',
+    modified_before: 'Modified before (YYYY-MM-DD)',
+    modified_after: 'Modified after (YYYY-MM-DD)',
+    modified_within_days: 'Modified within (number of days)',
+    no_extension: 'No value needed (matches files without extension)',
+    duplicate: 'No value needed (matches duplicate files)',
   };
   const hints = {
     extension: 'e.g. pdf, jpg, png',
-    name_contains: 'e.g. Screenshot (case-insensitive)',
+    name_contains: 'e.g. Screenshot, IMG_ (comma-separated)',
     name_pattern: 'e.g. report_*.pdf',
     size_gt: 'e.g. 1048576 for 1 MB',
     size_lt: 'e.g. 1024 for 1 KB',
+    created_before: 'Files created before this date',
+    created_after: 'Files created after this date',
+    modified_before: 'Files modified before this date',
+    modified_after: 'Files modified after this date',
+    modified_within_days: 'e.g. 30 for files modified in last 30 days',
+    no_extension: 'Files with no extension (e.g. README, Makefile)',
+    duplicate: 'Files flagged as duplicates in the scan',
   };
   label.textContent = labels[type] || 'Value';
   if (hint) hint.textContent = hints[type] || '';
+  // Show/hide value input based on whether filter type needs a value
+  const noValueTypes = ['no_extension', 'duplicate'];
+  if (valueInput) {
+    valueInput.style.display = noValueTypes.includes(type) ? 'none' : '';
+  }
 }
 
 // ---------------------------------------------------------------------------

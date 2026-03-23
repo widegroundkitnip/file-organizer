@@ -57,9 +57,6 @@ class FilterCondition:
         elif self.type == "default":
             # Catch-all — always matches (for fallback rules)
             return True
-        elif self.type == "path_contains":
-            path = file.get("path", "")
-            return any(v in path for v in (self.values or []))
         elif self.type == "duplicate":
             # Files that are duplicates (flagged in manifest)
             return file.get("is_duplicate", False)
@@ -88,8 +85,35 @@ class Rule:
         if "filter" in d and d["filter"]:
             f = d["filter"]
             if isinstance(f, dict):
-                d["filter"] = FilterCondition(**f)
+                d["filter"] = cls._dict_to_filter(f)
         return cls(**d)
+
+    @classmethod
+    def _dict_to_filter(cls, f: dict) -> "FilterCondition":
+        """Recursively convert a filter dict to FilterCondition, handling nested all_of/any_of."""
+        ftype = f.get("type", "")
+        # Support both "values" and "conditions" keys for composite filters
+        values = f.get("values") if f.get("values") is not None else f.get("conditions")
+        # Recursively convert nested conditions for all_of/any_of/none_of
+        if ftype in ("all_of", "any_of", "none_of") and isinstance(values, list):
+            converted_values = []
+            for cond in values:
+                if isinstance(cond, dict):
+                    converted_values.append(cls._dict_to_filter(cond))
+                elif isinstance(cond, FilterCondition):
+                    converted_values.append(cond)
+                else:
+                    raise ValueError(f"Invalid nested condition in {ftype}: {cond!r}")
+            return FilterCondition(type=ftype, values=converted_values)
+        # Build kwargs — include value/values only if present in source dict
+        kwargs = {"type": ftype}
+        if "values" in f:
+            kwargs["values"] = f["values"]
+        elif "conditions" in f:
+            kwargs["values"] = f["conditions"]
+        if "value" in f:
+            kwargs["value"] = f["value"]
+        return FilterCondition(**kwargs)
 
 
 class RuleManager:
@@ -102,7 +126,11 @@ class RuleManager:
         if Path(self.rules_path).exists():
             with open(self.rules_path) as f:
                 data = json.load(f)
-                self.rules = [Rule.from_dict(r) for r in data.get("rules", [])]
+                # Support both {"rules": [...]} and bare [...]
+                if isinstance(data, list):
+                    self.rules = [Rule.from_dict(r) for r in data]
+                else:
+                    self.rules = [Rule.from_dict(r) for r in data.get("rules", [])]
         else:
             self.rules = self._default_rules()
             self.save()

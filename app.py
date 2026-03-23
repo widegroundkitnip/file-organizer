@@ -224,6 +224,7 @@ async def api_list_scans():
 
 @app.get("/api/rules")
 async def api_get_rules():
+    from planner import RuleManager
     rm = RuleManager(str(BASE_DIR / "rules.json"))
     return {"rules": [r.to_dict() for r in rm.rules]}
 
@@ -250,32 +251,34 @@ async def api_put_rules(body: RulesUpdate):
 @app.post("/api/preview")
 async def api_preview(req: PreviewRequest):
     """Generate action plan from manifest + rules via planner.plan_from_manifest()."""
-    # Import planner directly (same process)
-    try:
-        from planner import load_manifest, plan_from_manifest
-    except ImportError:
-        raise HTTPException(status_code=500, detail="planner.py not found")
-
     if not os.path.exists(req.manifest_path):
         raise HTTPException(status_code=404, detail=f"Manifest not found: {req.manifest_path}")
+
+    from planner.rules import Rule, FilterCondition
+
+    # Convert raw rule dicts to Rule objects
+    rules = []
+    for r in (req.rules or []):
+        r = dict(r)
+        if r.get("filter"):
+            r["filter"] = FilterCondition(**r["filter"])
+        rules.append(Rule(**r))
 
     settings = load_settings()
     output_dir = settings.get("base_output_dir", "/tmp/file-organizer-output")
 
     try:
+        from planner import load_manifest, plan_from_manifest
         manifest = load_manifest(req.manifest_path)
-        plan = plan_from_manifest(manifest, req.rules, output_dir)
+        result = plan_from_manifest(
+            manifest=manifest,
+            rules=rules,
+            default_output_dir=output_dir,
+        )
+        # Canonical return: {actions, stats, plan_id}
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Planner error: {e}")
-
-    stats = {
-        "total": len(plan),
-        "to_move": sum(1 for a in plan if a["action"] == "move"),
-        "to_delete": sum(1 for a in plan if a["action"] == "delete"),
-        "to_skip": sum(1 for a in plan if a["action"] == "skip"),
-    }
-
-    return {"actions": plan, "stats": stats}
 
 
 # ---------------------------------------------------------------------------
@@ -542,31 +545,6 @@ async def manage_parent_folders(req: BoundaryRequest):
     raise HTTPException(status_code=400, detail="Invalid action. Use: add | remove | list")
 
 
-@app.get("/api/rules")
-async def get_rules(rules_path: str = "rules.json"):
-    """Return current rules."""
-    rp = Path(rules_path) if Path(rules_path).is_absolute() else BASE_DIR / rules_path
-    rm = RuleManager(str(rp))
-    return {"rules": [r.to_dict() for r in rm.rules]}
-
-
-@app.post("/api/rules")
-async def save_rules(req: RulesRequest):
-    """Save rules."""
-    from planner.rules import Rule, FilterCondition
-    rules = []
-    for r in req.rules:
-        r = dict(r)
-        if r.get("filter"):
-            r["filter"] = FilterCondition(**r["filter"])
-        rules.append(Rule(**r))
-    rp = Path(req.rules_path) if Path(req.rules_path).is_absolute() else BASE_DIR / req.rules_path
-    rm = RuleManager(str(rp))
-    rm.rules = rules
-    rm.save()
-    return {"rules": [r.to_dict() for r in rm.rules]}
-
-
 # ---------------------------------------------------------------------------
 # API: Settings
 # ---------------------------------------------------------------------------
@@ -581,60 +559,6 @@ async def api_put_settings(body: dict):
     save_settings(body)
     return {"status": "ok"}
 
-
-# ---------------------------------------------------------------------------
-# Phase 3 extended endpoints
-# ---------------------------------------------------------------------------
-
-@app.post("/api/plan")
-async def create_plan(req: PlanRequest):
-    """Generate action plan from manifest + rules with boundary + unknown guards."""
-    try:
-        if req.rules is not None:
-            from planner.rules import Rule, FilterCondition
-            rules = []
-            for r in req.rules:
-                d = dict(r)
-                if d.get("filter"):
-                    d["filter"] = FilterCondition(**d["filter"])
-                rules.append(Rule(**d))
-        else:
-            rm = RuleManager()
-            rules = rm.rules
-        return plan_from_manifest(
-            manifest=req.manifest,
-            rules=rules,
-            default_output_dir=req.output_dir,
-            parent_folders=req.parent_folders or [],
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/settings/parent-folders")
-async def list_parent_folders():
-    settings = load_settings()
-    return {"parent_folders": settings.get("parent_folders", [])}
-
-
-@app.post("/api/settings/parent-folders")
-async def manage_parent_folders(req: BoundaryRequest):
-    settings = load_settings()
-    if "parent_folders" not in settings:
-        settings["parent_folders"] = []
-
-    if req.action == "add" and req.path:
-        if req.path not in settings["parent_folders"]:
-            settings["parent_folders"].append(req.path)
-        save_settings(settings)
-        return {"parent_folders": settings["parent_folders"], "added": req.path}
-    elif req.action == "remove" and req.path:
-        settings["parent_folders"] = [p for p in settings["parent_folders"] if p != req.path]
-        save_settings(settings)
-        return {"parent_folders": settings["parent_folders"], "removed": req.path}
-    elif req.action == "list":
-        return {"parent_folders": settings.get("parent_folders", [])}
-    raise HTTPException(status_code=400, detail="Invalid action. Use: add | remove | list")
 
 # ---------------------------------------------------------------------------
 # Static file serving (web UI)

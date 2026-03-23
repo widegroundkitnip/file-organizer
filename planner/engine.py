@@ -159,7 +159,7 @@ def plan_from_manifest(
                 dst = os.path.join(default_output_dir, dst)
 
             actions.append(Action(
-                action="move",
+                action=rule.action,
                 src=path,
                 dst=dst,
                 rule_matched=rule.name,
