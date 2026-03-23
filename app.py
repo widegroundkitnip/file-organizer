@@ -352,7 +352,8 @@ async def api_preview(req: PreviewRequest):
         # Canonical return: {actions, stats, plan_id}
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Planner error: {e}")
+        logger.error(f"[PREVIEW] Failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Preview failed: {e}")
 
 
 # ---------------------------------------------------------------------------
