@@ -938,7 +938,7 @@ document.addEventListener('mouseout', function(e) {
 });
 
 function showTooltip(el) {
-  hideTooltip(); // remove any existing
+  hideTooltip();
   var text = el.getAttribute('data-tooltip');
   if (!text) return;
   var bubble = document.createElement('div');
@@ -946,18 +946,31 @@ function showTooltip(el) {
   bubble.textContent = text;
   bubble.id = 'active-tooltip';
   document.body.appendChild(bubble);
-  // Position near the element
+  // Position after DOM insertion so we can measure it
   var rect = el.getBoundingClientRect();
-  var bRect = bubble.getBoundingClientRect();
-  var top = rect.top - bRect.height - 10;
-  var left = rect.left + rect.width / 2 - bRect.width / 2;
-  // Keep on screen
-  if (left < 10) left = 10;
-  if (left + bRect.width > window.innerWidth - 10) left = window.innerWidth - bRect.width - 10;
-  if (top < 10) top = rect.bottom + 10;
+  var bW = bubble.offsetWidth;
+  var bH = bubble.offsetHeight;
+  var vW = window.innerWidth;
+  var vH = window.innerHeight;
+  var arrowH = 8;
+  var pad = 10;
+
+  // Default: show above the element
+  var top = rect.top - bH - arrowH - pad;
+  var left = rect.left + rect.width / 2 - bW / 2;
+
+  // Flip below if not enough room above
+  if (top < pad) {
+    top = rect.bottom + arrowH + pad;
+  }
+
+  // Clamp horizontal
+  if (left < pad) left = pad;
+  if (left + bW > vW - pad) left = vW - bW - pad;
+
   bubble.style.top = top + 'px';
   bubble.style.left = left + 'px';
-  requestAnimationFrame(function() { bubble.classList.add('visible'); });
+  bubble.classList.add('visible');
 }
 
 function hideTooltip() {
