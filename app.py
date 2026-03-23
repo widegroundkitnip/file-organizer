@@ -15,7 +15,9 @@ Port: 3001
 
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -24,6 +26,8 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -232,13 +236,8 @@ async def api_get_rules():
 
 @app.put("/api/rules")
 async def api_put_rules(body: RulesUpdate):
-    from planner.rules import Rule, FilterCondition
-    rules = []
-    for r in body.rules:
-        r = dict(r)
-        if r.get("filter"):
-            r["filter"] = FilterCondition(**r["filter"])
-        rules.append(Rule(**r))
+    from planner.rules import Rule
+    rules = [Rule.from_dict(r) for r in body.rules]
     rm = RuleManager(str(BASE_DIR / "rules.json"))
     rm.rules = rules
     rm.save()
@@ -293,15 +292,10 @@ async def api_preview(req: PreviewRequest):
     if not os.path.exists(req.manifest_path):
         raise HTTPException(status_code=404, detail=f"Manifest not found: {req.manifest_path}")
 
-    from planner.rules import Rule, FilterCondition
+    from planner.rules import Rule
 
-    # Convert raw rule dicts to Rule objects
-    rules = []
-    for r in (req.rules or []):
-        r = dict(r)
-        if r.get("filter"):
-            r["filter"] = FilterCondition(**r["filter"])
-        rules.append(Rule(**r))
+    # Convert raw rule dicts to Rule objects using from_dict
+    rules = [Rule.from_dict(r) for r in (req.rules or [])]
 
     settings = load_settings()
     output_dir = settings.get("base_output_dir", "/tmp/file-organizer-output")
@@ -342,10 +336,13 @@ async def api_execute(req: ExecuteRequest):
         json.dump(req.action_plan, tmp, indent=2)
         plan_path = tmp.name
 
+    # Filter out unknown_review — these require human review and must never reach executor
+    executable_plan = [item for item in req.action_plan if item.get("action") != "unknown_review"]
+
     # Map action plan items to executor's expected format:
     # executor expects "delete" items to have "path" key, not "src"
     normalized_plan = []
-    for item in req.action_plan:
+    for item in executable_plan:
         if item["action"] == "delete":
             normalized_plan.append({
                 "action": "delete",
@@ -518,13 +515,8 @@ async def scan_multi(req: MultiPathScanRequest):
 async def create_plan(req: PlanRequest):
     """Generate action plan from manifest + rules."""
     if req.rules is not None:
-        from planner.rules import Rule, FilterCondition
-        rules = []
-        for r in list(req.rules):
-            r = dict(r)
-            if r.get("filter"):
-                r["filter"] = FilterCondition(**r["filter"])
-            rules.append(Rule(**r))
+        from planner.rules import Rule
+        rules = [Rule.from_dict(r) for r in list(req.rules)]
     else:
         rm = RuleManager(req.rules_path)
         rules = rm.rules
@@ -686,6 +678,7 @@ async def api_list_configs():
 async def api_save_config(req: dict):
     from datetime import datetime
     path = Path("data/run_configs.json")
+    Path("data").mkdir(parents=True, exist_ok=True)
     configs = []
     if path.exists():
         with open(path) as f:
