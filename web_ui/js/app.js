@@ -201,24 +201,12 @@ function renderScanHistory() {
 
 async function loadScan(scanId) {
   try {
+    // BUG-022: Use stable backend endpoint to get scan metadata + manifest path
+    const scanMeta = await api('GET', `/api/scans/${scanId}`);
+    state.manifestPath = scanMeta.manifest_path;
+    // Load manifest from the stable path returned by the backend
     const manifest = await api('GET', `/manifest/${scanId}`);
     state.manifest = manifest;
-    state.manifestPath = null; // will be resolved from scan id
-    // Try to find full path from scans list
-    const scan = state.scans.find(s => s.id === scanId);
-    if (scan) {
-      // Reconstruct path (server returns full path in manifest path field — use id to build it)
-      state.manifestPath = `/scans/${scanId}.json`; // relative; we need the server-side path
-    }
-    // Get actual manifest path from scans
-    const scanMeta = state.scans.find(s => s.id === scanId);
-    if (scanMeta) {
-      // We need the real FS path — request it from a scan that returned it
-      // Build it from the scan_output_dir in settings
-      const settings = await api('GET', '/settings');
-      const scanDir = settings.scan_output_dir || '';
-      state.manifestPath = scanDir ? `${scanDir}/${scanId}.json` : null;
-    }
     navigate('results');
   } catch(e) {
     showAlert('scan-alert', 'error', `Failed to load scan: ${e.message}`);

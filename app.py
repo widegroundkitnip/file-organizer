@@ -223,6 +223,31 @@ async def api_list_scans():
     return scans
 
 
+@app.get("/api/scans/{scan_id}")
+async def api_get_scan(scan_id: str):
+    """Return scan metadata including the manifest path for a given scan id."""
+    manifest_path = SCANS_DIR / f"{scan_id}.json"
+    if not manifest_path.exists():
+        raise HTTPException(status_code=404, detail=f"Scan not found: {scan_id}")
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+        meta = manifest.get("scan_meta", {})
+        return {
+            "id": scan_id,
+            "manifest_path": str(manifest_path),
+            "filename": manifest_path.name,
+            "path": meta.get("path", ""),
+            "mode": meta.get("mode", ""),
+            "timestamp": meta.get("timestamp", ""),
+            "total_files": meta.get("total_files", 0),
+            "total_size_bytes": meta.get("total_size_bytes", 0),
+            "scan_roots": meta.get("scan_roots", []),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read scan: {e}")
+
+
 # ---------------------------------------------------------------------------
 # API: Rules
 # ---------------------------------------------------------------------------
