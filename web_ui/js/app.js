@@ -1076,8 +1076,13 @@ async function init() {
 
 document.addEventListener('DOMContentLoaded', init);
 
-// Cross-Path Scan
-let crosspathPollCount = 0;
+// Show/hide scan-result nav items based on whether data exists
+function showResultNavItems() {
+  ['crosspath', 'structure', 'duplicates', 'unknown'].forEach(function(page) {
+    var nav = document.querySelector('[data-page="' + page + '"]');
+    if (nav) nav.style.display = '';
+  });
+}
 
 function pollCrossPathProgress() {
   crosspathPollCount = 0;
@@ -1144,6 +1149,7 @@ async function runCrossPathScan() {
     pollCrossPathProgress();
     const data = await scanPromise;
     window.lastCrossPathData = data;
+    showResultNavItems();
     const tier1 = data.tier1 || [];
     const tier2 = data.tier2 || [];
     const tier3 = data.tier3 || [];
