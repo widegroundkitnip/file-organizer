@@ -1100,6 +1100,8 @@ function openFolder(path) {
     showAlert('scan-alert', 'error', 'Could not open folder');
   });
 }
+
+function showCrosspathNavItems() {
   ['crosspath', 'structure', 'duplicates', 'unknown'].forEach(function(page) {
     var nav = document.querySelector('[data-page="' + page + '"]');
     if (nav) nav.style.display = '';
@@ -1107,7 +1109,9 @@ function openFolder(path) {
 }
 
 // Stub — previously referenced but not defined; no-op
-function updateIntentScopeVisibility() {}
+function updateIntentScopeVisibility() {
+  // Currently a no-op — intent/scope mode UI controls are rendered but not wired to visible behavior
+}
 
 function pollCrossPathProgress() {
   crosspathPollCount = 0;
