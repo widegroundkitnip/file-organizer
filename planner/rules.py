@@ -134,6 +134,19 @@ class RuleManager:
         else:
             self.rules = self._default_rules()
             self.save()
+        self._deduplicate()
+
+    def _deduplicate(self):
+        """Remove duplicate rules (same name + filter.type), keeping highest-priority (lowest number)."""
+        # Build key: (name, filter_type)
+        seen: dict[tuple[str, str], tuple[int, Rule]] = {}
+        for rule in self.rules:
+            ftype = rule.filter.type if rule.filter else "none"
+            key = (rule.name, ftype)
+            if key not in seen or rule.priority < seen[key][0]:
+                seen[key] = (rule.priority, rule)
+        # Sort by priority
+        self.rules = [r for _, r in sorted(seen.values(), key=lambda x: x[0])]
 
     def save(self):
         with open(self.rules_path, "w") as f:

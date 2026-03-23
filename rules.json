@@ -251,33 +251,6 @@
       ]
     },
     {
-      "id": "rule-images",
-      "name": "Images",
-      "enabled": false,
-      "priority": 30,
-      "filter": {
-        "type": "extension",
-        "values": [
-          "jpg",
-          "jpeg",
-          "png",
-          "webp",
-          "heic",
-          "gif",
-          "bmp",
-          "tiff",
-          "raw"
-        ],
-        "value": null
-      },
-      "destination_template": "Images/{name}.{ext}",
-      "conflict_mode": "rename",
-      "action": "move",
-      "tags": [
-        "images"
-      ]
-    },
-    {
       "id": "rule-documents",
       "name": "Documents",
       "enabled": false,
