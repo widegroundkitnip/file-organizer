@@ -635,6 +635,76 @@ async def api_mock_delete(req: dict):
 
 
 # ---------------------------------------------------------------------------
+# API: Snapshot (pre-run + verification)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/snapshot/create")
+async def api_create_snapshot(req: dict):
+    from planner.snapshot import create_snapshot
+    snap_id = create_snapshot(req["manifest"], req["plan"], req.get("rules", []), req.get("profile_id"))
+    return {"snapshot_id": snap_id}
+
+@app.get("/api/snapshot/{snapshot_id}")
+async def api_get_snapshot(snapshot_id: str):
+    from planner.snapshot import get_snapshot
+    snap = get_snapshot(snapshot_id)
+    if not snap:
+        raise HTTPException(404, "Snapshot not found")
+    return snap
+
+@app.post("/api/snapshot/{snapshot_id}/verify")
+async def api_verify_snapshot(snapshot_id: str, req: dict):
+    from planner.snapshot import verify_plan
+    result = verify_plan(snapshot_id, req.get("after_manifest", {}))
+    return result
+
+# ---------------------------------------------------------------------------
+# API: Project Detection
+# ---------------------------------------------------------------------------
+
+@app.post("/api/detect-projects")
+async def api_detect_projects(req: dict):
+    from planner.project_detect import detect_project_roots
+    paths = req.get("paths", [])
+    projects = detect_project_roots(paths)
+    return {"projects": projects}
+
+# ---------------------------------------------------------------------------
+# API: Run Configs (saved configurations)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/configs")
+async def api_list_configs():
+    configs = []
+    path = Path("data/run_configs.json")
+    if path.exists():
+        with open(path) as f:
+            configs = json.load(f)
+    return configs[-10:]  # last 10
+
+@app.post("/api/configs")
+async def api_save_config(req: dict):
+    from datetime import datetime
+    path = Path("data/run_configs.json")
+    configs = []
+    if path.exists():
+        with open(path) as f:
+            configs = json.load(f)
+    cfg = {
+        "id": hashlib.md5(str(datetime.now()).encode()).hexdigest()[:8],
+        "created": datetime.now().isoformat(),
+        "paths": req.get("paths", []),
+        "profile_id": req.get("profile_id"),
+        "intent_mode": req.get("intent_mode"),
+        "scope_mode": req.get("scope_mode"),
+        "dry_run": req.get("dry_run", True),
+    }
+    configs.append(cfg)
+    with open(path, "w") as f:
+        json.dump(configs[-20:], f, indent=2)  # keep last 20
+    return cfg
+
+# ---------------------------------------------------------------------------
 # Static file serving (web UI)
 # ---------------------------------------------------------------------------
 

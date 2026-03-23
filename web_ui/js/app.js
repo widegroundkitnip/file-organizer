@@ -411,62 +411,7 @@ async function saveRules() {
   }
 }
 
-function renderRules() {
-  const container = document.getElementById('rules-list');
-  if (!container) return;
 
-  if (!state.rules.length) {
-    container.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state-icon">📋</div>
-        <div>No rules yet. Add a rule to get started.</div>
-      </div>`;
-    return;
-  }
-
-  container.innerHTML = state.rules.map((rule, idx) => {
-    const flt = rule.filter || {};
-    const filterDesc = flt.type === 'extension'     ? `Extension: .${(flt.values||[]).join(', .')}` :
-                       flt.type === 'name_contains'  ? `Name contains: ${Array.isArray(flt.values) ? flt.values.join(', ') : (flt.value || '')}` :
-                       flt.type === 'path_contains'   ? `Path contains: ${Array.isArray(flt.values) ? flt.values.join(', ') : (flt.value || '')}` :
-                       flt.type === 'name_pattern'   ? `Pattern: ${flt.value || ''}` :
-                       flt.type === 'size_gt'        ? `Size > ${fmtSize(flt.value)}` :
-                       flt.type === 'size_lt'        ? `Size < ${fmtSize(flt.value)}` :
-                       flt.type === 'created_before' ? `Created before: ${flt.value || ''}` :
-                       flt.type === 'created_after'  ? `Created after: ${flt.value || ''}` :
-                       flt.type === 'modified_before' ? `Modified before: ${flt.value || ''}` :
-                       flt.type === 'modified_after'  ? `Modified after: ${flt.value || ''}` :
-                       flt.type === 'modified_within_days' ? `Modified within ${flt.value} days` :
-                       flt.type === 'no_extension'   ? `No extension` :
-                       flt.type === 'duplicate'      ? `Duplicate` :
-                       flt.type || 'No filter';
-    const actionBadge = rule.action === 'delete' ? 'badge-delete' : rule.action === 'skip' ? 'badge-skip' : 'badge-move';
-    const actionLabel = rule.action === 'delete' ? '🗑 Delete' : rule.action === 'skip' ? '— Skip' : '→ Move';
-    return `
-      <div class="rule-card" data-idx="${idx}">
-        <div class="rule-card-header">
-          <span class="rule-handle">⠿</span>
-          <span class="rule-name">${escHtml(rule.name || 'Unnamed rule')}</span>
-          <span class="${actionBadge}" style="font-size:11px;padding:2px 6px;border-radius:4px;font-weight:bold">${actionLabel}</span>
-          <span class="category-tag ${categoryClass(rule.category || 'Other')}">${escHtml(rule.category || 'Other')}</span>
-          <label class="checkbox-label" style="flex-shrink:0">
-            <input type="checkbox" ${rule.enabled !== false ? 'checked' : ''} onchange="toggleRule(${idx}, this.checked)">
-            On
-          </label>
-          <button class="rule-delete" onclick="deleteRule(${idx})" title="Delete rule">✕</button>
-        </div>
-        <div class="text-sm text-muted" style="margin-bottom:8px">
-          <strong>Filter:</strong> ${escHtml(filterDesc)}
-          ${rule.subfolder ? `&nbsp;·&nbsp;<strong>Subfolder:</strong> ${escHtml(rule.subfolder)}` : ''}
-          ${rule.destination_template ? `&nbsp;·&nbsp;<strong>Template:</strong> <span class="text-mono">${escHtml(rule.destination_template)}</span>` : ''}
-        </div>
-        <div class="btn-group">
-          <button class="btn btn-secondary" onclick="editRule(${idx})">✏ Edit</button>
-        </div>
-      </div>
-    `;
-  }).join('');
-}
 
 function addRule() {
   const name = document.getElementById('new-rule-name')?.value?.trim() || 'New Rule';
@@ -635,69 +580,102 @@ function renderPreview(stats) {
     return;
   }
 
-  const statsHtml = stats ? `
-    <div class="stats-grid mb-16">
-      <div class="stat-card"><div class="stat-value">${stats.total}</div><div class="stat-label">Total</div></div>
-      <div class="stat-card"><div class="stat-value text-primary">${stats.to_move}</div><div class="stat-label">Move</div></div>
-      <div class="stat-card"><div class="stat-value text-error">${stats.to_delete}</div><div class="stat-label">Delete</div></div>
-      <div class="stat-card"><div class="stat-value text-muted">${stats.to_skip}</div><div class="stat-label">Skip</div></div>
-    </div>
-  ` : '';
+  // Group actions by category
+  var groups = {
+    organize: { label: "📁 Organize", items: [], color: "var(--accent)" },
+    duplicates: { label: "🔁 Duplicates", items: [], color: "var(--warning)" },
+    skipped: { label: "✓ Skipped", items: [], color: "#22c55e" },
+    blocked: { label: "⛔ Blocked", items: [], color: "var(--error)" },
+    unknown: { label: "⚠ Unknown", items: [], color: "#f59e0b" }
+  };
+  state.actionPlan.forEach(function(a) {
+    if (a.status === "skipped" || a.action === "skip") groups.skipped.items.push(a);
+    else if (a.blocked || a.status === "blocked") groups.blocked.items.push(a);
+    else if (a.is_duplicate) groups.duplicates.items.push(a);
+    else if (a.is_unknown) groups.unknown.items.push(a);
+    else groups.organize.items.push(a);
+  });
 
-  const filterBar = `
-    <div class="filter-bar" id="preview-filter-bar">
-      ${['all','move','delete','skip'].map(f => `
-        <button class="filter-chip ${state.filter === f ? 'active' : ''}" onclick="setPreviewFilter('${f}')">
-          ${f.charAt(0).toUpperCase() + f.slice(1)}
-          <span class="filter-count">(${state.actionPlan.filter(a => f === 'all' || a.action === f).length})</span>
-        </button>
-      `).join('')}
-      <span style="margin-left:auto;display:flex;gap:6px">
-        <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="selectAllActions('move')">All Moves</button>
-        <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="selectAllActions('delete')">All Deletes</button>
-        <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="deselectAll()">None</button>
-      </span>
-    </div>
-  `;
+  // Build action row HTML
+  function buildActionRow(item, realIdx) {
+    var icon = item.action === 'move' ? '→' : item.action === 'delete' ? '🗑' : '—';
+    var badgeClass = 'badge-' + (item.action || 'move');
+    var isDupKeep = item.rule_matched === '_duplicate_resolution' && item.action === 'skip';
+    var isDupDelete = item.rule_matched === '_duplicate_resolution' && item.action === 'delete';
+    var defaultChecked = item.action === 'move' || (item.action === 'delete' && !isDupDelete);
 
-  const filtered = state.filter === 'all' ? state.actionPlan : state.actionPlan.filter(a => a.action === state.filter);
+    var row = '<div class="action-item">';
+    row += '<input type="checkbox" id="action-cb-' + realIdx + '" ' + (isDupKeep ? 'disabled' : '') + ' ' + (defaultChecked ? 'checked' : '') + '>';
+    row += '<span class="action-icon">' + icon + '</span>';
+    row += '<div class="action-details">';
 
-  const actionsHtml = filtered.map((item, i) => {
-    const realIdx = state.actionPlan.indexOf(item);
-    const icon = item.action === 'move' ? '→' : item.action === 'delete' ? '🗑' : '—';
-    const badgeClass = `badge-${item.action}`;
+    // Rule badge + reason per item
+    if (item.rule_name) {
+      var reasonText = item.rule_match_reason ? '<span style="color:#6b7280;font-size:11px;margin-left:6px">via ' + escHtml(item.rule_match_reason) + '</span>' : '';
+      row += '<div style="margin-bottom:4px"><span style="background:rgba(139,92,246,0.2);color:var(--accent);padding:2px 8px;border-radius:12px;font-size:11px;font-weight:bold">' + escHtml(item.rule_name) + '</span>' + reasonText + '</div>';
+    }
+    row += '<div class="action-src">' + escHtml(item.src) + '</div>';
+    if (item.dst && item.action !== 'skip') {
+      row += '<div class="action-arrow">↓</div><div class="action-dst">' + escHtml(item.dst) + '</div>';
+    }
+    if (item.rule_match_reason && !item.rule_name) {
+      row += '<div style="color:#555;font-size:11px;margin-top:4px">' + escHtml(item.rule_match_reason) + '</div>';
+    }
+    if (item.blocked_reason) {
+      row += '<div style="color:var(--error);font-size:11px;margin-top:4px">⛔ ' + escHtml(item.blocked_reason) + '</div>';
+    }
+    row += '</div>';
+    row += '<span class="action-badge ' + badgeClass + '">' + (item.action || 'move') + '</span>';
+    row += '</div>';
+    return row;
+  }
 
-    // Pre-check logic: moves always checked; duplicate "keep" skips uncheckable; dup deletes unchecked
-    const isDupKeep = item.rule_matched === '_duplicate_resolution' && item.action === 'skip';
-    const isDupDelete = item.rule_matched === '_duplicate_resolution' && item.action === 'delete';
-    const defaultChecked = item.action === 'move' || (item.action === 'delete' && !isDupDelete);
+  // Collapsible group sections
+  var groupsHtml = '';
+  ['organize', 'duplicates', 'skipped', 'blocked', 'unknown'].forEach(function(gKey) {
+    var g = groups[gKey];
+    if (!g.items.length) return;
+    var groupId = 'group-' + gKey;
+    var count = g.items.length;
+    groupsHtml += '<div style="margin-bottom:12px">';
+    groupsHtml += '<div class="filter-chip active" style="background:' + g.color + ';color:white;cursor:pointer;display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;margin-bottom:8px" onclick="toggleGroup(\'' + groupId + '\')">';
+    groupsHtml += '<span style="font-size:14px;font-weight:bold">' + g.label + '</span>';
+    groupsHtml += '<span style="margin-left:auto;font-size:12px;opacity:0.9">' + count + ' item' + (count !== 1 ? 's' : '') + '</span>';
+    groupsHtml += '<span style="font-size:10px;margin-left:4px">▾</span>';
+    groupsHtml += '</div>';
+    groupsHtml += '<div id="' + groupId + '" class="group-items">';
+    g.items.forEach(function(item) {
+      var realIdx = state.actionPlan.indexOf(item);
+      groupsHtml += buildActionRow(item, realIdx);
+    });
+    groupsHtml += '</div></div>';
+  });
 
-    // Rule name shown prominently (teal/green) above the file path
-    const ruleName = item.rule_name || item.rule_matched || '';
-    const matchReason = item.rule_match_reason || '';
-    const ruleBadge = ruleName
-      ? `<div style="margin-bottom:4px">
-           <span style="background:#0d9488;color:white;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:bold">${escHtml(ruleName)}</span>
-           ${matchReason ? `<span style="color:#6b7280;font-size:11px;margin-left:6px">via ${escHtml(matchReason)}</span>` : ''}
-         </div>`
-      : '';
+  // Stats bar (summary)
+  var total = state.actionPlan.length;
+  var statsHtml = stats ? '<div class="stats-grid mb-16">' +
+    '<div class="stat-card"><div class="stat-value">' + stats.total + '</div><div class="stat-label">Total</div></div>' +
+    '<div class="stat-card"><div class="stat-value text-primary">' + stats.to_move + '</div><div class="stat-label">Move</div></div>' +
+    '<div class="stat-card"><div class="stat-value text-error">' + stats.to_delete + '</div><div class="stat-label">Delete</div></div>' +
+    '<div class="stat-card"><div class="stat-value text-muted">' + stats.to_skip + '</div><div class="stat-label">Skip</div></div>' +
+    '</div>' : '';
 
-    return `
-      <div class="action-item">
-        <input type="checkbox" id="action-cb-${realIdx}" ${isDupKeep ? 'disabled' : ''} ${defaultChecked ? 'checked' : ''}>
-        <span class="action-icon">${icon}</span>
-        <div class="action-details">
-          ${ruleBadge}
-          <div class="action-src">${escHtml(item.src)}</div>
-          ${item.dst ? `<div class="action-arrow">↓</div><div class="action-dst">${escHtml(item.dst)}</div>` : ''}
-        </div>
-        <span class="action-badge ${badgeClass}">${item.action}</span>
-      </div>
-    `;
-  }).join('');
+  container.innerHTML = statsHtml + groupsHtml;
 
-  container.innerHTML = statsHtml + filterBar +
-    `<div id="actions-list">${actionsHtml || '<div class="empty-state"><div>No actions match filter.</div></div>'}</div>`;
+  // Collapsed by default for large groups
+  ['blocked', 'unknown', 'skipped'].forEach(function(gKey) {
+    var g = groups[gKey];
+    if (g.items.length > 0) {
+      var el = document.getElementById('group-' + gKey);
+      if (el) el.style.display = 'none';
+    }
+  });
+}
+
+function toggleGroup(groupId) {
+  var el = document.getElementById(groupId);
+  if (!el) return;
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
 
 function setPreviewFilter(f) {

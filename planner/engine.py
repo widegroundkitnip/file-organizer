@@ -19,6 +19,8 @@ class Action:
     conflict_mode: str = "rename"
     error_reason: str = ""
     classification: str = "known"  # known | unknown | system
+    blocked: bool = False
+    blocked_reason: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -110,7 +112,9 @@ def plan_from_manifest(
     rules: List[Rule],
     default_output_dir: str,
     parent_folders: Optional[List[str]] = None,
-    default_category: str = "Other"
+    default_category: str = "Other",
+    project_roots: Optional[List[dict]] = None,
+    scope_mode: str = "preserve_parent_boundaries"
 ) -> dict:
     """
     Generate action plan from manifest + rules.
@@ -187,6 +191,17 @@ def plan_from_manifest(
 
     # RULE 2: Boundary checks
     actions = check_boundary_conflicts(actions, parent_folders)
+
+    # RULE 2b: Project-safe scope enforcement
+    if scope_mode == "project_safe_mode" and project_roots:
+        protected = {p["path"] for p in project_roots}
+        for action in actions:
+            if action.get("src"):
+                src_dir = os.path.dirname(action["src"])
+                dst_dir = os.path.dirname(action.get("dst", ""))
+                if src_dir not in protected and any(dst_dir.startswith(p) for p in protected if dst_dir.startswith(p)):
+                    action["blocked"] = True
+                    action["blocked_reason"] = "project_safe_mode: would move file out of detected project"
 
     # RULE 3: Unknown file enforcement (double-check, already applied above)
     actions = check_unknown_files(files, actions)
