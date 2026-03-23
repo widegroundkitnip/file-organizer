@@ -825,7 +825,7 @@ function renderSettings() {
       <div class="card-title">General</div>
       <div class="form-group">
         <label>Base Output Directory</label>
-        <input type="text" id="set-base-output" value="${escHtml(s.base_output_dir || '')}">
+        <input type="text" id="set-base-output" data-tooltip="Where moved files will go. A trash subfolder is created automatically." value="${escHtml(s.base_output_dir || '')}">
       </div>
       <div class="form-group">
         <label>Trash Directory</label>
@@ -833,11 +833,27 @@ function renderSettings() {
       </div>
       <div class="form-group">
         <label>Default Conflict Mode</label>
-        <select id="set-conflict-mode">
+        <select id="set-conflict-mode" data-tooltip="Rename: adds _1, _2 to filename. Skip: leaves existing file as-is. Overwrite: replaces destination file.">
           <option value="rename" ${s.default_conflict_mode === 'rename' ? 'selected' : ''}>Rename (_1, _2…)</option>
           <option value="skip" ${s.default_conflict_mode === 'skip' ? 'selected' : ''}>Skip</option>
           <option value="overwrite" ${s.default_conflict_mode === 'overwrite' ? 'selected' : ''}>Overwrite (⚠ destructive)</option>
         </select>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Protected Folders</div>
+      <div class="text-sm text-muted" style="margin-bottom:12px">These folders and their subfolders will never be modified by any action.</div>
+      <div id="protected-folders-list">
+        ${((s.protected_folders)||[]).map(function(p, i) {
+          return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #222">' +
+            '<span style="flex:1;font-family:monospace;font-size:13px;color:var(--text)">'+escHtml(p)+'</span>' +
+            '<button class="btn btn-sm" style="padding:2px 8px;font-size:11px;color:var(--error)" data-tooltip="Remove this folder from the protected list." onclick="removeProtectedFolder('+i+')">✕ Remove</button></div>';
+        }).join('')}
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <input type="text" id="set-protected-folder" data-tooltip="Add a folder that should never be modified. Acts as a safety boundary." placeholder="/path/to/safe/folder" style="flex:1;padding:8px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--text)">
+        <button class="btn btn-secondary" data-tooltip="Add this folder to the protected list." onclick="addProtectedFolder()">+ Add</button>
       </div>
     </div>
 
@@ -883,6 +899,71 @@ function syncColorText(key) {
   if (text && color && /^#[0-9a-f]{6}$/i.test(text.value)) {
     color.value = text.value;
   }
+}
+
+function addProtectedFolder() {
+  const input = document.getElementById('set-protected-folder');
+  if (!input || !input.value.trim()) return;
+  if (!state.settings.protected_folders) state.settings.protected_folders = [];
+  if (!state.settings.protected_folders.includes(input.value.trim())) {
+    state.settings.protected_folders.push(input.value.trim());
+  }
+  input.value = '';
+  renderSettings();
+}
+
+function removeProtectedFolder(idx) {
+  if (!state.settings.protected_folders) return;
+  state.settings.protected_folders.splice(idx, 1);
+  renderSettings();
+}
+
+// ── Hover Tooltip System ─────────────────────────────────────────────────────
+var _tooltipTimer = null;
+
+document.addEventListener('mouseover', function(e) {
+  var el = e.target.closest('[data-tooltip]');
+  if (!el) return;
+  clearTimeout(_tooltipTimer);
+  _tooltipTimer = setTimeout(function() {
+    showTooltip(el);
+  }, 1000); // 1 second delay
+});
+
+document.addEventListener('mouseout', function(e) {
+  var el = e.target.closest('[data-tooltip]');
+  if (!el) return;
+  clearTimeout(_tooltipTimer);
+  hideTooltip();
+});
+
+function showTooltip(el) {
+  hideTooltip(); // remove any existing
+  var text = el.getAttribute('data-tooltip');
+  if (!text) return;
+  var bubble = document.createElement('div');
+  bubble.className = 'tooltip-bubble';
+  bubble.textContent = text;
+  bubble.id = 'active-tooltip';
+  document.body.appendChild(bubble);
+  // Position near the element
+  var rect = el.getBoundingClientRect();
+  var bRect = bubble.getBoundingClientRect();
+  var top = rect.top - bRect.height - 10;
+  var left = rect.left + rect.width / 2 - bRect.width / 2;
+  // Keep on screen
+  if (left < 10) left = 10;
+  if (left + bRect.width > window.innerWidth - 10) left = window.innerWidth - bRect.width - 10;
+  if (top < 10) top = rect.bottom + 10;
+  bubble.style.top = top + 'px';
+  bubble.style.left = left + 'px';
+  requestAnimationFrame(function() { bubble.classList.add('visible'); });
+}
+
+function hideTooltip() {
+  clearTimeout(_tooltipTimer);
+  var existing = document.getElementById('active-tooltip');
+  if (existing) existing.remove();
 }
 
 function applyTheme(t) {
@@ -980,6 +1061,7 @@ function addPathInput() {
   input.className = "path-input";
   input.id = "crosspath-input-" + crosspathInputCount;
   input.placeholder = "/path/to/folder";
+  input.setAttribute('data-tooltip', 'Add folder paths to compare. At least 2 paths required. Each is scanned fully.');
   input.style = "width:100%;padding:10px;background:var(--surface);color:var(--text);border:1px solid #333;border-radius:8px;margin-bottom:8px";
   container.appendChild(input);
   crosspathInputCount++;
