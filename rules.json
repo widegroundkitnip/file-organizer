@@ -2,60 +2,97 @@
   {
     "id": "rule-protected-env",
     "name": "Protected env files",
-    "enabled": true,
+    "enabled": false,
     "priority": 1,
     "filter": {
       "type": "extension",
-      "values": ["env", "ini", "cfg", "toml"]
+      "values": [
+        "env",
+        "ini",
+        "cfg",
+        "toml"
+      ]
     },
     "destination_template": "{parent}/{name}.{ext}",
     "conflict_mode": "skip",
-    "tags": ["protected"]
+    "tags": [
+      "protected"
+    ]
   },
   {
     "id": "rule-keep-tagged",
     "name": "Keep tagged files",
-    "enabled": true,
+    "enabled": false,
     "priority": 2,
     "filter": {
       "type": "name_contains",
-      "values": ["KEEP"]
+      "values": [
+        "KEEP"
+      ]
     },
     "destination_template": "{parent}/{name}.{ext}",
     "conflict_mode": "skip",
-    "tags": ["protected"]
+    "tags": [
+      "protected"
+    ]
   },
   {
     "id": "rule-screenshots",
     "name": "Screenshots",
-    "enabled": true,
+    "enabled": false,
     "priority": 10,
     "filter": {
       "type": "any_of",
       "conditions": [
-        { "type": "name_contains", "values": ["Screenshot"] },
-        { "type": "name_contains", "values": ["Skärmbild"] }
+        {
+          "type": "name_contains",
+          "values": [
+            "Screenshot"
+          ]
+        },
+        {
+          "type": "name_contains",
+          "values": [
+            "Sk\u00e4rmbild"
+          ]
+        }
       ]
     },
     "destination_template": "Images/Screenshots/{year}/{month}/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["images", "screenshots"]
+    "tags": [
+      "images",
+      "screenshots"
+    ]
   },
   {
     "id": "rule-camera-photos",
     "name": "Camera photos",
-    "enabled": true,
+    "enabled": false,
     "priority": 11,
     "filter": {
       "type": "any_of",
       "conditions": [
-        { "type": "name_contains", "values": ["IMG_"] },
-        { "type": "name_contains", "values": ["DSC_"] }
+        {
+          "type": "name_contains",
+          "values": [
+            "IMG_"
+          ]
+        },
+        {
+          "type": "name_contains",
+          "values": [
+            "DSC_"
+          ]
+        }
       ]
     },
     "destination_template": "Images/Camera/{year}/{month}/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["images", "camera"]
+    "tags": [
+      "images",
+      "camera"
+    ]
   },
   {
     "id": "rule-large-videos",
@@ -65,13 +102,28 @@
     "filter": {
       "type": "all_of",
       "conditions": [
-        { "type": "extension", "values": ["mp4", "mov", "mkv", "avi", "webm"] },
-        { "type": "size_gt", "value": 500000000 }
+        {
+          "type": "extension",
+          "values": [
+            "mp4",
+            "mov",
+            "mkv",
+            "avi",
+            "webm"
+          ]
+        },
+        {
+          "type": "size_gt",
+          "value": 500000000
+        }
       ]
     },
     "destination_template": "LargeFiles/Videos/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["large", "videos"]
+    "tags": [
+      "large",
+      "videos"
+    ]
   },
   {
     "id": "rule-large-archives",
@@ -81,185 +133,358 @@
     "filter": {
       "type": "all_of",
       "conditions": [
-        { "type": "extension", "values": ["zip", "rar", "7z", "tar", "gz"] },
-        { "type": "size_gt", "value": 500000000 }
+        {
+          "type": "extension",
+          "values": [
+            "zip",
+            "rar",
+            "7z",
+            "tar",
+            "gz"
+          ]
+        },
+        {
+          "type": "size_gt",
+          "value": 500000000
+        }
       ]
     },
     "destination_template": "LargeFiles/Archives/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["large", "archives"]
+    "tags": [
+      "large",
+      "archives"
+    ]
   },
   {
     "id": "rule-images",
     "name": "Images",
-    "enabled": true,
+    "enabled": false,
     "priority": 30,
     "filter": {
       "type": "extension",
-      "values": ["jpg", "jpeg", "png", "webp", "heic", "gif", "bmp", "tiff", "raw"]
+      "values": [
+        "jpg",
+        "jpeg",
+        "png",
+        "webp",
+        "heic",
+        "gif",
+        "bmp",
+        "tiff",
+        "raw"
+      ]
     },
     "destination_template": "Images/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["images"]
+    "tags": [
+      "images"
+    ]
   },
   {
     "id": "rule-documents",
     "name": "Documents",
-    "enabled": true,
+    "enabled": false,
     "priority": 31,
     "filter": {
       "type": "extension",
-      "values": ["pdf", "doc", "docx", "txt", "md", "rtf", "odt", "xlsx", "xls", "pptx", "ppt"]
+      "values": [
+        "pdf",
+        "doc",
+        "docx",
+        "txt",
+        "md",
+        "rtf",
+        "odt",
+        "xlsx",
+        "xls",
+        "pptx",
+        "ppt"
+      ]
     },
     "destination_template": "Documents/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["documents"]
+    "tags": [
+      "documents"
+    ]
   },
   {
     "id": "rule-videos",
     "name": "Videos",
-    "enabled": true,
+    "enabled": false,
     "priority": 32,
     "filter": {
       "type": "extension",
-      "values": ["mp4", "mov", "mkv", "avi", "webm", "m4v"]
+      "values": [
+        "mp4",
+        "mov",
+        "mkv",
+        "avi",
+        "webm",
+        "m4v"
+      ]
     },
     "destination_template": "Videos/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["videos"]
+    "tags": [
+      "videos"
+    ]
   },
   {
     "id": "rule-audio",
     "name": "Audio",
-    "enabled": true,
+    "enabled": false,
     "priority": 33,
     "filter": {
       "type": "extension",
-      "values": ["mp3", "wav", "m4a", "flac", "aac", "ogg", "wma", "aiff"]
+      "values": [
+        "mp3",
+        "wav",
+        "m4a",
+        "flac",
+        "aac",
+        "ogg",
+        "wma",
+        "aiff"
+      ]
     },
     "destination_template": "Audio/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["audio"]
+    "tags": [
+      "audio"
+    ]
   },
   {
     "id": "rule-code",
     "name": "Code",
-    "enabled": true,
+    "enabled": false,
     "priority": 34,
     "filter": {
       "type": "extension",
-      "values": ["py", "js", "ts", "jsx", "tsx", "java", "c", "cpp", "h", "cs", "go", "rs", "php", "rb", "sh", "bash", "zsh", "css", "html", "xml", "yaml", "yml", "toml", "json", "sql", "r", "m"]
+      "values": [
+        "py",
+        "js",
+        "ts",
+        "jsx",
+        "tsx",
+        "java",
+        "c",
+        "cpp",
+        "h",
+        "cs",
+        "go",
+        "rs",
+        "php",
+        "rb",
+        "sh",
+        "bash",
+        "zsh",
+        "css",
+        "html",
+        "xml",
+        "yaml",
+        "yml",
+        "toml",
+        "json",
+        "sql",
+        "r",
+        "m"
+      ]
     },
     "destination_template": "Code/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["code"]
+    "tags": [
+      "code"
+    ]
   },
   {
     "id": "rule-notebooks",
     "name": "Notebooks",
-    "enabled": true,
+    "enabled": false,
     "priority": 35,
     "filter": {
       "type": "extension",
-      "values": ["ipynb"]
+      "values": [
+        "ipynb"
+      ]
     },
     "destination_template": "Code/Notebooks/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["code", "notebooks"]
+    "tags": [
+      "code",
+      "notebooks"
+    ]
   },
   {
     "id": "rule-data",
     "name": "Data files",
-    "enabled": true,
+    "enabled": false,
     "priority": 36,
     "filter": {
       "type": "extension",
-      "values": ["csv", "tsv", "xlsx", "xls", "parquet", "json", "jsonl", "pickle"]
+      "values": [
+        "csv",
+        "tsv",
+        "xlsx",
+        "xls",
+        "parquet",
+        "json",
+        "jsonl",
+        "pickle"
+      ]
     },
     "destination_template": "Data/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["data"]
+    "tags": [
+      "data"
+    ]
   },
   {
     "id": "rule-archives",
     "name": "Archives",
-    "enabled": true,
+    "enabled": false,
     "priority": 37,
     "filter": {
       "type": "extension",
-      "values": ["zip", "rar", "7z", "tar", "gz", "bz2", "xz", "dmg", "iso"]
+      "values": [
+        "zip",
+        "rar",
+        "7z",
+        "tar",
+        "gz",
+        "bz2",
+        "xz",
+        "dmg",
+        "iso"
+      ]
     },
     "destination_template": "Archives/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["archives"]
+    "tags": [
+      "archives"
+    ]
   },
   {
     "id": "rule-apps",
     "name": "App installers",
-    "enabled": true,
+    "enabled": false,
     "priority": 38,
     "filter": {
       "type": "extension",
-      "values": ["exe", "msi", "dmg", "pkg", "deb", "rpm", "apk"]
+      "values": [
+        "exe",
+        "msi",
+        "dmg",
+        "pkg",
+        "deb",
+        "rpm",
+        "apk"
+      ]
     },
     "destination_template": "Apps/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["apps"]
+    "tags": [
+      "apps"
+    ]
   },
   {
     "id": "rule-fonts",
     "name": "Fonts",
-    "enabled": true,
+    "enabled": false,
     "priority": 39,
     "filter": {
       "type": "extension",
-      "values": ["ttf", "otf", "woff", "woff2", "eot"]
+      "values": [
+        "ttf",
+        "otf",
+        "woff",
+        "woff2",
+        "eot"
+      ]
     },
     "destination_template": "Assets/Fonts/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["assets", "fonts"]
+    "tags": [
+      "assets",
+      "fonts"
+    ]
   },
   {
     "id": "rule-design-assets",
     "name": "Design assets",
-    "enabled": true,
+    "enabled": false,
     "priority": 40,
     "filter": {
       "type": "extension",
-      "values": ["psd", "ai", "fig", "sketch", "xd", "svg"]
+      "values": [
+        "psd",
+        "ai",
+        "fig",
+        "sketch",
+        "xd",
+        "svg"
+      ]
     },
     "destination_template": "Assets/Design/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["assets", "design"]
+    "tags": [
+      "assets",
+      "design"
+    ]
   },
   {
     "id": "rule-temp-files",
     "name": "Temp files",
-    "enabled": true,
+    "enabled": false,
     "priority": 50,
     "filter": {
       "type": "extension",
-      "values": ["tmp", "temp", "log", "bak", "old", "cache", "lock", "swp", "swo"]
+      "values": [
+        "tmp",
+        "temp",
+        "log",
+        "bak",
+        "old",
+        "cache",
+        "lock",
+        "swp",
+        "swo"
+      ]
     },
     "destination_template": "Temp/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["temp"]
+    "tags": [
+      "temp"
+    ]
   },
   {
     "id": "rule-downloads-pdfs",
     "name": "PDFs from Downloads",
-    "enabled": true,
+    "enabled": false,
     "priority": 60,
     "filter": {
       "type": "all_of",
       "conditions": [
-        { "type": "path_contains", "values": ["Downloads"] },
-        { "type": "extension", "values": ["pdf"] }
+        {
+          "type": "path_contains",
+          "values": [
+            "Downloads"
+          ]
+        },
+        {
+          "type": "extension",
+          "values": [
+            "pdf"
+          ]
+        }
       ]
     },
     "destination_template": "Documents/PDFs/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["downloads", "documents"]
+    "tags": [
+      "downloads",
+      "documents"
+    ]
   },
   {
     "id": "rule-downloads-docs",
@@ -269,13 +494,29 @@
     "filter": {
       "type": "all_of",
       "conditions": [
-        { "type": "path_contains", "values": ["Downloads"] },
-        { "type": "extension", "values": ["doc", "docx", "txt", "md"] }
+        {
+          "type": "path_contains",
+          "values": [
+            "Downloads"
+          ]
+        },
+        {
+          "type": "extension",
+          "values": [
+            "doc",
+            "docx",
+            "txt",
+            "md"
+          ]
+        }
       ]
     },
     "destination_template": "Documents/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["downloads", "documents"]
+    "tags": [
+      "downloads",
+      "documents"
+    ]
   },
   {
     "id": "rule-downloads-archives",
@@ -285,13 +526,30 @@
     "filter": {
       "type": "all_of",
       "conditions": [
-        { "type": "path_contains", "values": ["Downloads"] },
-        { "type": "extension", "values": ["zip", "rar", "7z", "tar", "gz"] }
+        {
+          "type": "path_contains",
+          "values": [
+            "Downloads"
+          ]
+        },
+        {
+          "type": "extension",
+          "values": [
+            "zip",
+            "rar",
+            "7z",
+            "tar",
+            "gz"
+          ]
+        }
       ]
     },
     "destination_template": "Archives/Downloads/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["downloads", "archives"]
+    "tags": [
+      "downloads",
+      "archives"
+    ]
   },
   {
     "id": "rule-downloads-images",
@@ -301,13 +559,30 @@
     "filter": {
       "type": "all_of",
       "conditions": [
-        { "type": "path_contains", "values": ["Downloads"] },
-        { "type": "extension", "values": ["jpg", "jpeg", "png", "webp", "heic"] }
+        {
+          "type": "path_contains",
+          "values": [
+            "Downloads"
+          ]
+        },
+        {
+          "type": "extension",
+          "values": [
+            "jpg",
+            "jpeg",
+            "png",
+            "webp",
+            "heic"
+          ]
+        }
       ]
     },
     "destination_template": "Images/Downloads/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["downloads", "images"]
+    "tags": [
+      "downloads",
+      "images"
+    ]
   },
   {
     "id": "rule-small-files",
@@ -320,30 +595,36 @@
     },
     "destination_template": "Other/SmallFiles/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["size"]
+    "tags": [
+      "size"
+    ]
   },
   {
     "id": "rule-no-extension",
     "name": "No extension (unknown)",
-    "enabled": true,
+    "enabled": false,
     "priority": 98,
     "filter": {
       "type": "no_extension"
     },
     "destination_template": "Unknown/{name}",
     "conflict_mode": "skip",
-    "tags": ["unknown"]
+    "tags": [
+      "unknown"
+    ]
   },
   {
     "id": "rule-fallback",
     "name": "Fallback (catch-all)",
-    "enabled": true,
+    "enabled": false,
     "priority": 99,
     "filter": {
       "type": "default"
     },
     "destination_template": "Other/{name}.{ext}",
     "conflict_mode": "rename",
-    "tags": ["fallback"]
+    "tags": [
+      "fallback"
+    ]
   }
 ]

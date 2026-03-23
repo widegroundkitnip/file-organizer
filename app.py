@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -558,6 +559,41 @@ async def api_get_settings():
 async def api_put_settings(body: dict):
     save_settings(body)
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# API: Mock Data Generator
+# ---------------------------------------------------------------------------
+
+@app.post("/api/mock/create")
+async def api_mock_create(req: dict):
+    """Generate mock test workspace. Body: {path: str, size_gb: int, categories: list[str]}"""
+    categories = req.get("categories", [])
+    size_gb = req.get("size_gb", 10)
+    output_dir = os.path.expanduser(req.get("path", "~/test_workspace"))
+
+    result = subprocess.run(
+        [sys.executable, str(BASE_DIR / "test_workspace_generator.py"),
+         "--output", output_dir,
+         "--size-gb", str(size_gb),
+         "--categories", json.dumps(categories)],
+        capture_output=True, text=True, timeout=300
+    )
+    if result.returncode != 0:
+        raise HTTPException(500, detail=result.stderr or "Generator failed")
+    return {"ok": True, "output": result.stdout.strip()}
+
+
+@app.post("/api/mock/delete")
+async def api_mock_delete(req: dict):
+    """Delete mock workspace. Body: {path: str}"""
+    path = os.path.expanduser(req.get("path", ""))
+    if not path:
+        raise HTTPException(400, detail="path required")
+    if not os.path.exists(path):
+        return {"ok": True, "note": "already gone"}
+    shutil.rmtree(path)
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

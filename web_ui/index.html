@@ -92,6 +92,10 @@
         <span class="nav-icon">⚙</span>
         <span>Settings</span>
       </button>
+      <button class="nav-item" data-page="mockdata" onclick="navigate('mockdata')">
+        <span class="nav-icon">🧪</span>
+        <span>Mock</span>
+      </button>
     </nav>
     <div class="sidebar-footer">Phase 3 · Local Only</div>
   </aside>
@@ -108,9 +112,10 @@
       <div class="card">
         <div class="form-group">
           <label>Folder Path</label>
-          <input type="text" id="scan-path" placeholder="/home/user/Downloads" style="font-family: monospace;flex:1">
-          <input type="file" id="scan-path-browse" webkitdirectory style="display:none" onchange="handleBrowseFolder(this, 'scan-path')">
-          <button class="btn btn-secondary" onclick="document.getElementById('scan-path-browse').click()" style="white-space:nowrap">📁 Browse</button>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="text" id="scan-path" placeholder="/path/to/folder" style="flex:1;font-family:monospace;padding:8px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--text)">
+            <button class="btn btn-secondary" onclick="browseForFolder('scan-path')" style="white-space:nowrap">📁 Enter Path</button>
+          </div>
         </div>
 
         <div class="form-group">
@@ -382,6 +387,55 @@
       <div class="page-title">⚠ Unknown Files</div>
       <div class="page-sub" style="color:var(--warning)">These files have no extension or unknown type. No automatic actions will be taken.</div>
       <div id="unknown-files" style="margin-top:16px"></div>
+    </section>
+
+    <!-- Mock Data Generator -->
+    <section class="page" id="page-mockdata">
+      <div class="page-title">🧪 Mock Data Generator</div>
+      <div class="page-sub">Create a synthetic test workspace to safely test File Organizer. All data is fake — no real files.</div>
+
+      <div style="background:#f59e0b20;border:1px solid #f59e0b;border-radius:8px;padding:12px;margin:16px 0;color:#f59e0b;font-size:13px">
+        ⚠ Files are <strong>sparse</strong> — they claim disk space but use almost no actual storage. 1TB fake = ~1MB actual.
+      </div>
+
+      <div style="margin-top:16px">
+        <label style="color:var(--text);font-size:13px;margin-bottom:6px;display:block">Where to create (full path):</label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="mock-path" placeholder="/Users/sigge/test_workspace" style="flex:1;padding:10px;background:var(--surface);color:var(--text);border:1px solid #333;border-radius:8px">
+          <button class="btn btn-secondary" onclick="document.getElementById('mock-path').value = prompt('Enter full path:') || document.getElementById('mock-path').value">📁 Browse</button>
+        </div>
+      </div>
+
+      <div style="margin-top:16px">
+        <label style="color:var(--text);font-size:13px;margin-bottom:6px;display:block">Size (fake): <span id="mock-size-label">10 GB</span></label>
+        <input type="range" id="mock-size" min="1" max="2000" value="10"
+          style="width:100%" oninput="document.getElementById('mock-size-label').textContent = this.value + ' GB'">
+        <div style="color:#666;font-size:12px;margin-top:4px">Slider sets fake file sizes. Actual disk used: ~1MB–100MB.</div>
+      </div>
+
+      <div style="margin-top:16px">
+        <label style="color:var(--text);font-size:13px;margin-bottom:8px;display:block">Categories to include:</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+          <label><input type="checkbox" class="mock-cat" value="images" checked> Images</label>
+          <label><input type="checkbox" class="mock-cat" value="videos" checked> Videos</label>
+          <label><input type="checkbox" class="mock-cat" value="documents" checked> Documents</label>
+          <label><input type="checkbox" class="mock-cat" value="audio" checked> Audio</label>
+          <label><input type="checkbox" class="mock-cat" value="code" checked> Code</label>
+          <label><input type="checkbox" class="mock-cat" value="archives" checked> Archives</label>
+          <label><input type="checkbox" class="mock-cat" value="design" checked> Design</label>
+          <label><input type="checkbox" class="mock-cat" value="datasets" checked> Datasets</label>
+          <label><input type="checkbox" class="mock-cat" value="temp" checked> Temp</label>
+          <label><input type="checkbox" class="mock-cat" value="duplicates" checked> Duplicates</label>
+          <label><input type="checkbox" class="mock-cat" value="nested" checked> Deep Nested</label>
+          <label><input type="checkbox" class="mock-cat" value="unknown" checked> Unknown</label>
+        </div>
+      </div>
+
+      <div style="margin-top:20px;display:flex;gap:10px">
+        <button class="btn btn-primary" onclick="createMockData()" style="background:#22c55e;border:none;color:white;padding:12px 24px;border-radius:8px;cursor:pointer">Generate Mock Data</button>
+        <button class="btn btn-secondary" onclick="deleteMockData()" style="background:#ef4444;border:none;color:white;padding:12px 24px;border-radius:8px;cursor:pointer">Delete</button>
+      </div>
+      <div id="mock-status" style="margin-top:12px;color:#666;font-size:13px"></div>
     </section>
 
   </main>

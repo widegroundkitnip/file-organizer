@@ -1077,7 +1077,7 @@ function modalCancel() {
 async function init() {
   await loadSettings();
   applyTheme(state.settings.theme || {});
-  await loadRules();
+  // Don't pre-load rules — user discovers them via Common Rules Library
   await loadScans();
   navigate('scan');
 
@@ -1343,13 +1343,20 @@ function rejectUnknown(path) {
 }
 
 // ── Folder Browse ─────────────────────────────────────────────────────────────
+function browseForFolder(targetInputId) {
+    var path = prompt("Enter the full path to the folder:");
+    if (path) {
+        var el = document.getElementById(targetInputId);
+        if (el) el.value = path;
+    }
+}
+
 function handleBrowseFolder(input, targetId) {
     var files = input.files;
     if (!files || files.length === 0) return;
     var dir = files[0].webkitRelativePath.split('/')[0];
     var target = document.getElementById(targetId);
     if (target) {
-        // Walk up to find the actual mount point / full path
         var fullPath = files[0].path || '';
         if (fullPath) {
             target.value = fullPath.substring(0, fullPath.indexOf(dir) + dir.length) || dir;
@@ -1359,3 +1366,364 @@ function handleBrowseFolder(input, targetId) {
     }
     input.value = '';
 }
+
+// ── Mock Data Generator ───────────────────────────────────────────────────────
+async function createMockData() {
+    var path = document.getElementById('mock-path').value.trim();
+    if (!path) { alert('Enter a path first'); return; }
+    var sizeGb = parseInt(document.getElementById('mock-size').value);
+    var cats = Array.from(document.querySelectorAll('.mock-cat:checked')).map(function(c) { return c.value; });
+    var status = document.getElementById('mock-status');
+    status.textContent = 'Generating...';
+    status.style.color = '#666';
+    try {
+        var r = await fetch('/api/mock/create', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({path: path, size_gb: sizeGb, categories: cats})
+        });
+        var d = await r.json();
+        status.textContent = 'Done! ' + (d.output || '');
+        status.style.color = '#22c55e';
+        document.getElementById('scan-path').value = path;
+        navigate('scan');
+    } catch(e) {
+        status.textContent = 'Error: ' + e.message;
+        status.style.color = '#ef4444';
+    }
+}
+
+async function deleteMockData() {
+    var path = document.getElementById('mock-path').value.trim();
+    if (!path) { alert('Enter the path to delete'); return; }
+    if (!confirm('Delete ' + path + '? This cannot be undone.')) return;
+    var status = document.getElementById('mock-status');
+    try {
+        await fetch('/api/mock/delete', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({path: path})
+        });
+        status.textContent = 'Deleted.';
+        status.style.color = '#f59e0b';
+    } catch(e) {
+        status.textContent = 'Error: ' + e.message;
+        status.style.color = '#ef4444';
+    }
+}
+
+// ── Rules — Collapsible Cards ─────────────────────────────────────────────────
+function renderRules() {
+    var container = document.getElementById('rules-list');
+    if (!container) return;
+
+    var html = '';
+
+    // Common Rules Library button
+    html += '<button class="btn btn-secondary" onclick="openCommonRulesModal()" style="margin-bottom:16px">📖 Common Rules Library</button>';
+
+    if (!state.rules.length) {
+        html += '<div class="empty-state"><div class="empty-state-icon">📋</div><div>No rules yet. Open the Common Rules Library or add your own.</div></div>';
+        container.innerHTML = html;
+        return;
+    }
+
+    html += state.rules.map(function(rule, idx) {
+        var flt = rule.filter || {};
+        var enabled = rule.enabled !== false;
+        var extStr = '';
+        if (flt.type === 'extension' && flt.values) {
+            extStr = flt.values.map(function(v) { return '.' + v; }).join(', ');
+        } else if (flt.type === 'name_contains' && flt.values) {
+            extStr = flt.values.join(', ');
+        } else if (flt.type === 'path_contains' && flt.values) {
+            extStr = 'path: ' + flt.values.join(', ');
+        } else if (flt.type === 'size_gt') {
+            extStr = '> ' + fmtSize(flt.value);
+        } else if (flt.type === 'size_lt') {
+            extStr = '< ' + fmtSize(flt.value);
+        } else if (flt.type === 'no_extension') {
+            extStr = 'no extension';
+        } else if (flt.type === 'duplicate') {
+            extStr = 'duplicate';
+        } else if (flt.value != null) {
+            extStr = String(flt.value);
+        }
+
+        var arrowId = 'ra-' + idx;
+        var detailsId = 'rd-' + idx;
+
+        return '<div class="rule-card" style="background:var(--surface);border:1px solid #333;border-radius:8px;padding:12px;margin-bottom:8px">' +
+            '<div style="display:flex;align-items:center;gap:10px">' +
+            '<div style="flex:1;font-weight:bold;color:var(--text)">' + escHtml(rule.name || 'Unnamed rule') + '</div>' +
+            '<label class="switch" style="display:flex;align-items:center;gap:6px;cursor:pointer">' +
+            '<input type="checkbox" ' + (enabled ? 'checked' : '') + ' onchange="toggleRule(' + idx + ', this.checked)">' +
+            '<span style="color:#666;font-size:11px">' + (enabled ? 'ON' : 'OFF') + '</span></label>' +
+            '<span id="' + arrowId + '" onclick="toggleRuleDetails(this, \'' + detailsId + '\')" style="color:#555;cursor:pointer;font-size:16px;user-select:none">▼</span>' +
+            '</div>' +
+            '<div id="' + detailsId + '" class="rule-details" style="margin-top:8px;padding-top:8px;border-top:1px solid #333;display:none">' +
+            '<div style="font-size:12px;color:#aaa;margin-bottom:4px"><strong>Filter:</strong> ' + escHtml(extStr) + '</div>' +
+            '<div style="font-size:12px;color:#aaa;margin-bottom:4px"><strong>Category:</strong> ' + escHtml(rule.category || 'Other') + '</div>' +
+            '<div style="font-size:12px;color:#aaa;margin-bottom:4px"><strong>Action:</strong> ' + escHtml(rule.action || 'move') + '</div>' +
+            (rule.destination_template ? '<div style="font-size:12px;color:#aaa;margin-bottom:4px"><strong>Template:</strong> <code style="color:#888">' + escHtml(rule.destination_template) + '</code></div>' : '') +
+            (rule.tags && rule.tags.length ? '<div style="font-size:12px;color:#aaa;margin-bottom:6px"><strong>Tags:</strong> ' + rule.tags.map(function(t) { return '<span style="background:#333;border-radius:3px;padding:1px 4px;margin-right:3px">' + escHtml(t) + '</span>'; }).join('') + '</div>' : '') +
+            '<button onclick="openEditModal(' + idx + ')" class="btn btn-secondary" style="margin-top:6px">✏ Edit</button>' +
+            '</div></div>';
+    }).join('');
+
+    container.innerHTML = html;
+}
+
+function toggleRuleDetails(arrow, detailsId) {
+    var details = document.getElementById(detailsId);
+    if (!details) return;
+    var isHidden = details.style.display === 'none';
+    details.style.display = isHidden ? 'block' : 'none';
+    arrow.textContent = isHidden ? '▶' : '▼';
+}
+
+function toggleRule(idx, enabled) {
+    if (state.rules[idx]) state.rules[idx].enabled = enabled;
+    // Update the ON/OFF label
+    var card = document.querySelector('.rule-card[data-idx="' + idx + '"]') || document.querySelectorAll('.rule-card')[idx];
+    if (card) {
+        var label = card.querySelector('.switch span');
+        if (label) label.textContent = enabled ? 'ON' : 'OFF';
+    }
+}
+
+function deleteRule(idx) {
+    state.rules.splice(idx, 1);
+    renderRules();
+}
+
+// ── Edit Rule Modal (full options) ────────────────────────────────────────────
+var _editRuleIdx = null;
+
+function openEditModal(idx) {
+    _editRuleIdx = idx;
+    var rule = state.rules[idx];
+    if (!rule) return;
+    var flt = rule.filter || {};
+    var fltType = flt.type || 'extension';
+    var fltValue = '';
+    if (fltType === 'extension' && flt.values) {
+        fltValue = flt.values.join(', ');
+    } else if ((fltType === 'name_contains' || fltType === 'path_contains') && flt.values) {
+        fltValue = flt.values.join(', ');
+    } else if (flt.value != null) {
+        fltValue = String(flt.value);
+    }
+
+    var body = '<div style="display:grid;gap:12px;text-align:left">' +
+
+        '<div class="form-group"><label style="color:var(--text);font-size:13px">Rule Name</label>' +
+        '<input type="text" id="edit-rule-name" value="' + escHtml(rule.name || '') + '" style="width:100%;padding:8px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--text);box-sizing:border-box"></div>' +
+
+        '<div class="form-group"><label style="color:var(--text);font-size:13px">Category</label>' +
+        '<select id="edit-rule-category" style="width:100%;padding:8px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--text)">' +
+        ['Images','Documents','Videos','Audio','Code','Archives','Other'].map(function(c) {
+            return '<option value="' + c + '"' + (rule.category === c ? ' selected' : '') + '>' + c + '</option>';
+        }).join('') + '</select></div>' +
+
+        '<div class="form-group"><label style="color:var(--text);font-size:13px">Action</label>' +
+        '<select id="edit-rule-action" style="width:100%;padding:8px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--text)">' +
+        '<option value="move"' + (rule.action === 'move' ? ' selected' : '') + '>Move to category folder</option>' +
+        '<option value="rename"' + (rule.action === 'rename' ? ' selected' : '') + '>Rename in place</option>' +
+        '<option value="delete"' + (rule.action === 'delete' ? ' selected' : '') + '>Delete (use with caution)</option>' +
+        '<option value="skip"' + (rule.action === 'skip' ? ' selected' : '') + '>Skip (do nothing)</option>' +
+        '</select></div>' +
+
+        '<div class="form-group"><label style="color:var(--text);font-size:13px">Filter Type</label>' +
+        '<select id="edit-rule-filter-type" onchange="updateEditFilterLabel()" style="width:100%;padding:8px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--text)">' +
+        ['extension','name_contains','name_pattern','path_contains','size_gt','size_lt',
+         'created_before','created_after','modified_before','modified_after',
+         'modified_within_days','no_extension','duplicate'].map(function(t) {
+            return '<option value="' + t + '"' + (fltType === t ? ' selected' : '') + '>' + t + '</option>';
+        }).join('') + '</select></div>' +
+
+        '<div class="form-group"><label id="edit-filter-label" style="color:var(--text);font-size:13px">Filter Value</label>' +
+        '<input type="text" id="edit-rule-filter-value" value="' + escHtml(fltValue) + '" style="width:100%;padding:8px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--text);box-sizing:border-box"></div>' +
+
+        '<div class="form-group"><label style="color:var(--text);font-size:13px">Destination Template</label>' +
+        '<input type="text" id="edit-rule-template" value="' + escHtml(rule.destination_template || '') + '" placeholder="{category}/{name}.{ext}" style="width:100%;padding:8px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--text);box-sizing:border-box"></div>' +
+
+        '<div class="form-group"><label style="color:var(--text);font-size:13px">Tags (comma-separated)</label>' +
+        '<input type="text" id="edit-rule-tags" value="' + escHtml((rule.tags || []).join(', ')) + '" style="width:100%;padding:8px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--text);box-sizing:border-box"></div>' +
+
+        '<div class="form-group"><label style="color:var(--text);font-size:13px">Conflict Mode</label>' +
+        '<select id="edit-rule-conflict" style="width:100%;padding:8px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--text)">' +
+        '<option value="rename"' + ((rule.conflict_mode || 'rename') === 'rename' ? ' selected' : '') + '>Rename (_1, _2…)</option>' +
+        '<option value="skip"' + (rule.conflict_mode === 'skip' ? ' selected' : '') + '>Skip (leave existing)</option>' +
+        '<option value="overwrite"' + (rule.conflict_mode === 'overwrite' ? ' selected' : '') + '>Overwrite</option>' +
+        '</select></div>' +
+
+        '</div>';
+
+    document.getElementById('modal-title').textContent = '✏ Edit Rule';
+    document.getElementById('modal-body').innerHTML = body;
+    document.getElementById('modal-overlay').classList.add('open');
+
+    // Override modal buttons for edit
+    var actions = document.querySelector('.modal-actions');
+    actions.innerHTML = '<button class="btn btn-secondary" onclick="modalCancel()">Cancel</button>' +
+        '<button class="btn btn-danger" onclick="confirmEditRule()">Save</button>';
+    _editRuleIdx = idx;
+}
+
+function updateEditFilterLabel() {
+    var type = document.getElementById('edit-rule-filter-type') && document.getElementById('edit-rule-filter-type').value;
+    var label = document.getElementById('edit-filter-label');
+    if (!label) return;
+    var labels = {
+        extension: 'Extensions (comma-separated)',
+        name_contains: 'Substrings (comma-separated)',
+        name_pattern: 'Glob pattern',
+        path_contains: 'Path substrings (comma-separated)',
+        size_gt: 'Minimum size in bytes',
+        size_lt: 'Maximum size in bytes',
+        created_before: 'Created before (YYYY-MM-DD)',
+        created_after: 'Created after (YYYY-MM-DD)',
+        modified_before: 'Modified before (YYYY-MM-DD)',
+        modified_after: 'Modified after (YYYY-MM-DD)',
+        modified_within_days: 'Modified within days',
+        no_extension: 'No value needed',
+        duplicate: 'No value needed',
+    };
+    label.textContent = labels[type] || 'Value';
+}
+
+function confirmEditRule() {
+    if (_editRuleIdx === null) return;
+    var idx = _editRuleIdx;
+    var rule = state.rules[idx];
+    if (!rule) return;
+
+    var filterType = document.getElementById('edit-rule-filter-type').value;
+    var filterValue = document.getElementById('edit-rule-filter-value').value.trim();
+    var filter = { type: filterType };
+    if (filterType === 'extension') {
+        filter.values = filterValue.split(',').map(function(v) { return v.trim().replace(/^\./, ''); }).filter(Boolean);
+    } else if (filterType === 'name_contains' || filterType === 'path_contains') {
+        filter.values = filterValue.split(',').map(function(v) { return v.trim(); }).filter(Boolean);
+    } else if (filterType === 'no_extension' || filterType === 'duplicate') {
+        filter.value = null;
+    } else {
+        filter.value = filterValue;
+    }
+
+    rule.name = document.getElementById('edit-rule-name').value.trim() || rule.name;
+    rule.category = document.getElementById('edit-rule-category').value;
+    rule.action = document.getElementById('edit-rule-action').value;
+    rule.filter = filter;
+    rule.destination_template = document.getElementById('edit-rule-template').value.trim();
+    rule.conflict_mode = document.getElementById('edit-rule-conflict').value;
+    var tagsVal = document.getElementById('edit-rule-tags').value.trim();
+    rule.tags = tagsVal ? tagsVal.split(',').map(function(t) { return t.trim(); }).filter(Boolean) : [];
+
+    document.getElementById('modal-overlay').classList.remove('open');
+    _editRuleIdx = null;
+    // Restore default modal buttons
+    var actions = document.querySelector('.modal-actions');
+    if (actions) actions.innerHTML = '<button class="btn btn-secondary" onclick="modalCancel()">Cancel</button><button class="btn btn-danger" onclick="modalConfirm()">Confirm</button>';
+    renderRules();
+}
+
+// ── Common Rules Library Modal ─────────────────────────────────────────────────
+var COMMON_RULES = [
+    { id: 'cr-1', name: 'Protected env files', category: 'Other', desc: 'Skips .env, .ini, .cfg, .toml files', filterType: 'extension', filterValues: 'env, ini, cfg, toml', action: 'skip', template: '{parent}/{name}.{ext}', tags: ['protected'] },
+    { id: 'cr-2', name: 'Keep tagged files', category: 'Other', desc: 'Skips files with KEEP in the name', filterType: 'name_contains', filterValues: 'KEEP', action: 'skip', template: '{parent}/{name}.{ext}', tags: ['protected'] },
+    { id: 'cr-3', name: 'Images', category: 'Images', desc: 'Moves jpg/jpeg/png/webp/heic/gif/bmp/tiff/raw', filterType: 'extension', filterValues: 'jpg, jpeg, png, webp, heic, gif, bmp, tiff, raw', action: 'move', template: 'Images/{name}.{ext}', tags: ['images'] },
+    { id: 'cr-4', name: 'Videos', category: 'Videos', desc: 'Moves mp4/mov/mkv/avi/webm/m4v', filterType: 'extension', filterValues: 'mp4, mov, mkv, avi, webm, m4v', action: 'move', template: 'Videos/{name}.{ext}', tags: ['videos'] },
+    { id: 'cr-5', name: 'Documents', category: 'Documents', desc: 'Moves pdf/doc/docx/txt/md/rtf/odt/xlsx/xls/pptx/ppt', filterType: 'extension', filterValues: 'pdf, doc, docx, txt, md, rtf, odt, xlsx, xls, pptx, ppt', action: 'move', template: 'Documents/{name}.{ext}', tags: ['documents'] },
+    { id: 'cr-6', name: 'Audio', category: 'Audio', desc: 'Moves mp3/wav/m4a/flac/aac/ogg', filterType: 'extension', filterValues: 'mp3, wav, m4a, flac, aac, ogg', action: 'move', template: 'Audio/{name}.{ext}', tags: ['audio'] },
+    { id: 'cr-7', name: 'Code', category: 'Code', desc: 'Moves py/js/ts/java/c/cpp/cs/go/rs/sh/css/html/xml/yaml/json/sql', filterType: 'extension', filterValues: 'py, js, ts, java, c, cpp, cs, go, rs, sh, css, html, xml, yaml, json, sql', action: 'move', template: 'Code/{name}.{ext}', tags: ['code'] },
+    { id: 'cr-8', name: 'Notebooks', category: 'Code', desc: 'Moves .ipynb Jupyter notebooks', filterType: 'extension', filterValues: 'ipynb', action: 'move', template: 'Code/Notebooks/{name}.{ext}', tags: ['code', 'notebooks'] },
+    { id: 'cr-9', name: 'Archives', category: 'Archives', desc: 'Moves zip/rar/7z/tar/gz/bz2/dmg/iso', filterType: 'extension', filterValues: 'zip, rar, 7z, tar, gz, bz2, dmg, iso', action: 'move', template: 'Archives/{name}.{ext}', tags: ['archives'] },
+    { id: 'cr-10', name: 'Data files', category: 'Data', desc: 'Moves csv/tsv/xlsx/xls/parquet/json/jsonl', filterType: 'extension', filterValues: 'csv, tsv, xlsx, xls, parquet, json, jsonl', action: 'move', template: 'Data/{name}.{ext}', tags: ['data'] },
+    { id: 'cr-11', name: 'Design assets', category: 'Assets', desc: 'Moves psd/ai/fig/sketch/xd/svg', filterType: 'extension', filterValues: 'psd, ai, fig, sketch, xd, svg', action: 'move', template: 'Assets/Design/{name}.{ext}', tags: ['assets', 'design'] },
+    { id: 'cr-12', name: 'Fonts', category: 'Assets', desc: 'Moves ttf/otf/woff/woff2', filterType: 'extension', filterValues: 'ttf, otf, woff, woff2', action: 'move', template: 'Assets/Fonts/{name}.{ext}', tags: ['assets', 'fonts'] },
+    { id: 'cr-13', name: 'App installers', category: 'Apps', desc: 'Moves exe/msi/dmg/pkg/deb/rpm/apk', filterType: 'extension', filterValues: 'exe, msi, dmg, pkg, deb, rpm, apk', action: 'move', template: 'Apps/{name}.{ext}', tags: ['apps'] },
+    { id: 'cr-14', name: 'Screenshots', category: 'Images', desc: 'Moves files with Screenshot or Skärmbild in name', filterType: 'name_contains', filterValues: 'Screenshot, Skärmbild', action: 'move', template: 'Images/Screenshots/{year}/{month}/{name}.{ext}', tags: ['images', 'screenshots'] },
+    { id: 'cr-15', name: 'Camera photos', category: 'Images', desc: 'Moves IMG_/DSC_ camera files', filterType: 'name_contains', filterValues: 'IMG_, DSC_', action: 'move', template: 'Images/Camera/{year}/{month}/{name}.{ext}', tags: ['images', 'camera'] },
+    { id: 'cr-16', name: 'Temp files', category: 'Temp', desc: 'Moves tmp/temp/log/bak/old/cache files', filterType: 'extension', filterValues: 'tmp, temp, log, bak, old, cache', action: 'move', template: 'Temp/{name}.{ext}', tags: ['temp'] },
+    { id: 'cr-17', name: 'Large video files', category: 'LargeFiles', desc: 'Moves mp4/mov/mkv/avi/webm >500MB', filterType: 'size_gt', filterValues: '524288000', action: 'move', template: 'LargeFiles/Videos/{name}.{ext}', tags: ['large', 'videos'] },
+    { id: 'cr-18', name: 'Large archives', category: 'LargeFiles', desc: 'Moves zip/rar/7z/tar/gz >500MB', filterType: 'size_gt', filterValues: '524288000', action: 'move', template: 'LargeFiles/Archives/{name}.{ext}', tags: ['large', 'archives'] },
+    { id: 'cr-19', name: 'PDFs from Downloads', category: 'Documents', desc: 'Moves pdf from Downloads/ to Documents/PDFs/', filterType: 'path_contains', filterValues: 'Downloads', action: 'move', template: 'Documents/PDFs/{name}.{ext}', tags: ['downloads', 'documents'] },
+    { id: 'cr-20', name: 'Docs from Downloads', category: 'Documents', desc: 'Moves doc/docx/txt/md from Downloads/', filterType: 'path_contains', filterValues: 'Downloads', action: 'move', template: 'Documents/{name}.{ext}', tags: ['downloads', 'documents'] },
+    { id: 'cr-21', name: 'Archives from Downloads', category: 'Archives', desc: 'Moves archives from Downloads/', filterType: 'path_contains', filterValues: 'Downloads', action: 'move', template: 'Archives/Downloads/{name}.{ext}', tags: ['downloads', 'archives'] },
+    { id: 'cr-22', name: 'Images from Downloads', category: 'Images', desc: 'Moves jpg/png/webp from Downloads/', filterType: 'path_contains', filterValues: 'Downloads', action: 'move', template: 'Images/Downloads/{name}.{ext}', tags: ['downloads', 'images'] },
+    { id: 'cr-23', name: 'Very small files', category: 'Other', desc: 'Moves files <1KB to Other/SmallFiles/', filterType: 'size_lt', filterValues: '1024', action: 'move', template: 'Other/SmallFiles/{name}.{ext}', tags: ['size'], enabled: false },
+    { id: 'cr-24', name: 'No extension', category: 'Unknown', desc: 'Moves files without extension to Unknown/', filterType: 'no_extension', filterValues: '', action: 'move', template: 'Unknown/{name}', tags: ['unknown'] },
+    { id: 'cr-25', name: 'Fallback (catch-all)', category: 'Other', desc: 'Catches everything else and moves to Other/', filterType: 'default', filterValues: '', action: 'move', template: 'Other/{name}.{ext}', tags: ['fallback'] },
+];
+
+function openCommonRulesModal() {
+    var html = '<div style="max-height:60vh;overflow-y:auto">' +
+        '<p style="color:#888;font-size:13px;margin-bottom:16px">Select rules to add to your Rules Builder. Added rules can be toggled on/off and edited.</p>';
+
+    COMMON_RULES.forEach(function(cr) {
+        var alreadyAdded = state.rules.some(function(r) { return r.name === cr.name; });
+        html += '<div style="margin-bottom:10px;padding:10px;background:var(--surface);border:1px solid #333;border-radius:6px">' +
+            '<label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">' +
+            '<input type="checkbox" class="common-rule-cb" value="' + cr.id + '"' + (alreadyAdded ? ' disabled checked' : '') + ' style="margin-top:3px;flex-shrink:0">' +
+            '<div style="flex:1">' +
+            '<div style="font-weight:bold;color:var(--text);font-size:13px">' + escHtml(cr.name) + '</div>' +
+            '<div style="color:#888;font-size:12px;margin-top:2px">' + escHtml(cr.desc) + '</div>' +
+            '<div style="color:#555;font-size:11px;margin-top:3px">Category: ' + escHtml(cr.category) + ' · Action: ' + escHtml(cr.action) + '</div>' +
+            (alreadyAdded ? '<div style="color:#22c55e;font-size:11px;margin-top:3px">✓ Already added</div>' : '') +
+            '</div></label></div>';
+    });
+
+    html += '</div>';
+    document.getElementById('modal-title').textContent = '📖 Common Rules Library';
+    document.getElementById('modal-body').innerHTML = html;
+    var actions = document.querySelector('.modal-actions');
+    actions.innerHTML = '<button class="btn btn-secondary" onclick="modalCancel()">Cancel</button>' +
+        '<button class="btn btn-primary" onclick="addCommonRules()">+ Add Selected</button>';
+    document.getElementById('modal-overlay').classList.add('open');
+}
+
+function addCommonRules() {
+    var checkboxes = document.querySelectorAll('.common-rule-cb:checked:not(:disabled)');
+    checkboxes.forEach(function(cb) {
+        var crId = cb.value;
+        var cr = COMMON_RULES.find(function(c) { return c.id === crId; });
+        if (!cr) return;
+        // Check if already added
+        if (state.rules.some(function(r) { return r.name === cr.name; })) return;
+
+        var filter = { type: cr.filterType };
+        if (cr.filterType === 'extension') {
+            filter.values = cr.filterValues.split(',').map(function(v) { return v.trim(); });
+        } else if (cr.filterType === 'name_contains' || cr.filterType === 'path_contains') {
+            filter.values = cr.filterValues.split(',').map(function(v) { return v.trim(); });
+        } else if (cr.filterType === 'no_extension' || cr.filterType === 'duplicate') {
+            filter.value = null;
+        } else if (cr.filterValues) {
+            filter.value = cr.filterValues;
+        }
+
+        state.rules.push({
+            name: cr.name,
+            category: cr.category,
+            action: cr.action,
+            filter: filter,
+            destination_template: cr.template,
+            conflict_mode: cr.action === 'skip' ? 'skip' : 'rename',
+            tags: cr.tags || [],
+            enabled: cr.enabled !== false,
+        });
+    });
+
+    document.getElementById('modal-overlay').classList.remove('open');
+    // Restore default modal buttons
+    var actions = document.querySelector('.modal-actions');
+    if (actions) actions.innerHTML = '<button class="btn btn-secondary" onclick="modalCancel()">Cancel</button><button class="btn btn-danger" onclick="modalConfirm()">Confirm</button>';
+    renderRules();
+    showAlert('rules-alert', 'success', 'Added ' + checkboxes.length + ' rule(s) from library.');
+}
+
+// Ensure toggleRule works with string idx from renderRules
+var origToggleRule = toggleRule;
+
