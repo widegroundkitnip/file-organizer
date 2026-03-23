@@ -19,6 +19,7 @@ const state = {
   scans: [],
   scanMode: 'fast',
   filter: 'all',
+  selectedProfile: 'generic',
 };
 
 window.lastCrossPathData = null;
@@ -1079,6 +1080,7 @@ async function init() {
   applyTheme(state.settings.theme || {});
   // Don't pre-load rules — user discovers them via Common Rules Library
   await loadScans();
+  await loadProfiles();
   navigate('scan');
 
   // Set scan mode toggle state
@@ -1726,4 +1728,148 @@ function addCommonRules() {
 
 // Ensure toggleRule works with string idx from renderRules
 var origToggleRule = toggleRule;
+
+// ─── Run Profiles ───────────────────────────────────────────────────────────
+
+async function loadProfiles() {
+    try {
+        var profiles = await api("GET", "/api/profiles");
+        var container = document.getElementById("profile-selector");
+        if (!container) return;
+
+        container.innerHTML = profiles.map(function(p) {
+            return '<button class="profile-card" data-profile="' + p.id + '" onclick="selectProfile(\'' + p.id + '\')" ' +
+                'title="' + p.description + '" style="' +
+                'display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);' +
+                'background:rgba(255,255,255,0.04);cursor:pointer;font-size:13px;color:var(--text);transition:all 0.15s">' +
+                '<span style="font-size:16px">' + p.icon + '</span>' +
+                '<span>' + p.name + '</span>' +
+                '</button>';
+        }).join("");
+
+        // Init first profile as selected
+        if (profiles.length > 0) {
+            selectProfile(profiles[0].id);
+        }
+    } catch(e) {
+        console.error("loadProfiles failed", e);
+    }
+}
+
+function selectProfile(profileId) {
+    state.selectedProfile = profileId;
+    document.querySelectorAll(".profile-card").forEach(function(el) {
+        el.style.borderColor = el.dataset.profile === profileId
+            ? "var(--accent)"
+            : "rgba(255,255,255,0.1)";
+        el.style.background = el.dataset.profile === profileId
+            ? "rgba(139,92,246,0.15)"
+            : "rgba(255,255,255,0.04)";
+    });
+    updateIntentScopeVisibility();
+}
+
+function updateIntentScopeVisibility() {
+    // Intent/scope are always visible; profile just pre-populates rules
+}
+
+async function generateProfileRules(profileId) {
+    try {
+        var res = await api("POST", "/api/profiles/" + profileId + "/generate-rules");
+        if (res.count > 0) {
+            await loadRules();
+            renderRules();
+            showAlert("rules-alert", "success", res.count + " rule(s) from profile added (disabled — enable what you want).");
+        }
+    } catch(e) {
+        console.error("generateProfileRules failed", e);
+    }
+}
+
+// ─── Help System ─────────────────────────────────────────────────────────────
+
+var helpSections = {
+  scan: `<h2 style="color:var(--accent);margin-bottom:12px">🔍 Scan</h2>
+<p>Enter a folder path and click <strong>Scan</strong> to inventory all files. The app finds duplicates, organizes files by type, and builds a folder map.</p>
+<h3 style="margin-top:16px;color:var(--text)">Run Profile</h3>
+<p>Choose a <strong>Run Profile</strong> to pre-load relevant rules. Generic = no rules. Images/Videos/Documents/Code = category-specific rules. Duplicates = focus on finding dupes.</p>
+<h3 style="margin-top:16px;color:var(--text)">Intent Mode</h3>
+<p>Choose what to do: <strong>Organize only</strong> (sort by category), <strong>Duplicates only</strong> (find dupes), or <strong>Both</strong>.</p>
+<h3 style="margin-top:16px;color:var(--text)">Scope / Safety</h3>
+<p><strong>Preserve boundaries</strong>: files stay within selected folders. <strong>Global organize</strong>: files may cross folders. <strong>Project-safe</strong>: detected code/data projects are protected.</p>
+<h3 style="margin-top:16px;color:var(--text)">Scan Modes</h3>
+<p><strong>Fast</strong>: filename + size duplicates only. <strong>Deep</strong>: full SHA256 hash — slower but accurate.</p>`,
+
+  results: `<h2 style="color:var(--accent);margin-bottom:12px">📊 Results</h2>
+<p>See all discovered files. Use the search box to filter by filename.</p>`,
+
+  rules: `<h2 style="color:var(--accent);margin-bottom:12px">📁 Rules</h2>
+<p>Rules decide what happens to each file. Files are matched in <strong>priority order</strong> — first match wins.</p>
+<h3 style="margin-top:16px;color:var(--text)">Adding Rules</h3>
+<p>Click <strong>+ Common Rules Library</strong> to browse preset bundles. Check the ones you want, click <strong>Add Selected</strong>.</p>
+<h3 style="margin-top:16px;color:var(--text)">Actions</h3>
+<p><strong>Move</strong>: move to destination. <strong>Skip</strong>: leave file as-is. <strong>Delete</strong>: move to trash.</p>`,
+
+  preview: `<h2 style="color:var(--accent);margin-bottom:12px">👁 Preview</h2>
+<p>See exactly what will happen before anything changes. Each file shows <strong>which rule matched</strong> and <strong>where it will go</strong>.</p>`,
+
+  execute: `<h2 style="color:var(--accent);margin-bottom:12px">⚡ Execute</h2>
+<div style="background:#f59e0b20;border:1px solid #f59e0b;border-radius:8px;padding:12px;margin-bottom:16px">⚠ <strong>Dry Run is ON</strong> — no files modified. Turn OFF to apply changes.</div>
+<p><strong>Rename</strong>: adds _1, _2 if file exists. <strong>Skip</strong>: leave existing. <strong>Overwrite</strong>: replace.</p>
+<p>Every run creates an <strong>undo snapshot</strong> — restore from Execute page history.</p>`,
+
+  crosspath: `<h2 style="color:var(--accent);margin-bottom:12px">🔀 Cross-Path</h2>
+<p>Scan <strong>multiple folders</strong> at once. Finds duplicates across different locations.</p>`,
+
+  structure: `<h2 style="color:var(--accent);margin-bottom:12px">🗂 Structure</h2>
+<p>See folder tree and structural issues. Deep nesting and empty folders are flagged.</p>`,
+
+  duplicates: `<h2 style="color:var(--accent);margin-bottom:12px">🔁 Duplicates</h2>
+<p><strong>Exact</strong>: same SHA256 hash. <strong>Likely</strong>: same name + size. <strong>Similar</strong>: similar name + size. Click a file path to reveal in Finder.</p>`,
+
+  unknown: `<h2 style="color:var(--accent);margin-bottom:12px">⚠ Unknown</h2>
+<p>Files with no recognized extension. Review before executing. Click <strong>Keep</strong> (safe folder) or <strong>Delete</strong> (trash).</p>`,
+
+  settings: `<h2 style="color:var(--accent);margin-bottom:12px">⚙ Settings</h2>
+<p><strong>Protected Folders</strong>: paths that File Organizer will never touch. Add folders you want to keep completely safe.</p>`,
+
+  mockdata: `<h2 style="color:var(--accent);margin-bottom:12px">🧪 Mock Data</h2>
+<p>Generate a synthetic test workspace. All files are <strong>sparse</strong> — claim disk space but use almost none.</p>
+<ul style="margin-top:8px">
+<li>Choose size: 1–2000 GB fake</li>
+<li>Pick categories: images, videos, code, etc.</li>
+<li>Files are created at the chosen path</li>
+<li>Auto-fills scan path when done</li>
+</ul>`,
+
+  profiles: `<h2 style="color:var(--accent);margin-bottom:12px">🏷 Run Profiles</h2>
+<p>Pre-configured rule bundles for specific goals. Select on the Scan page before scanning.</p>
+<ul style="margin-top:8px">
+<li><strong>Generic</strong>: scan only, no rules</li>
+<li><strong>Images</strong>: photo + screenshot + camera rules</li>
+<li><strong>Videos</strong>: video file rules</li>
+<li><strong>Documents</strong>: PDF, Word, spreadsheet rules</li>
+<li><strong>Duplicates</strong>: duplicate detection focus</li>
+<li><strong>Code</strong>: source code file rules</li>
+</ul>`
+};
+
+function showHelpSection(id) {
+    var content = document.getElementById("help-content");
+    if (!content) return;
+    content.innerHTML = helpSections[id] || "<p>Coming soon.</p>";
+    document.querySelectorAll(".help-toc-item").forEach(function(el) { el.classList.remove("active"); });
+    if (event && event.target) event.target.classList.add("active");
+}
+
+// Patch navigate to init help page
+var _orig_navigate = navigate;
+navigate = function(page) {
+    _orig_navigate(page);
+    if (page === "help") {
+        showHelpSection("scan");
+        var first = document.querySelector(".help-toc-item");
+        if (first) first.classList.add("active");
+    }
+};
 

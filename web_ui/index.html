@@ -36,6 +36,10 @@
     .tooltip-bubble.visible {
       opacity: 1;
     }
+
+    .help-toc-item { cursor:pointer; padding:6px 8px; border-radius:6px; font-size:13px; color:var(--text); margin-bottom:2px; }
+    .help-toc-item:hover { background:rgba(255,255,255,0.06); }
+    .help-toc-item.active { background:rgba(139,92,246,0.2); color:var(--accent); font-weight:bold; }
   </style>
 </head>
 <body>
@@ -96,6 +100,10 @@
         <span class="nav-icon">🧪</span>
         <span>Mock</span>
       </button>
+      <button class="nav-item" data-page="help" onclick="navigate('help')">
+        <span class="nav-icon">📖</span>
+        <span>Help</span>
+      </button>
     </nav>
     <div class="sidebar-footer">Phase 3 · Local Only</div>
   </aside>
@@ -132,6 +140,12 @@
             <input type="checkbox" id="include-hidden">
             Include hidden folders (dotfiles)
           </label>
+        </div>
+
+        <!-- Run Profile -->
+        <div style="margin-bottom:16px">
+          <div style="color:var(--text);font-size:13px;font-weight:bold;margin-bottom:8px">Run Profile</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap" id="profile-selector"></div>
         </div>
 
         <div class="btn-group">
@@ -454,5 +468,28 @@
 </div>
 
 <script src="/js/app.js"></script>
+
+<!-- ── Page: Help ── -->
+<section class="page" id="page-help" style="display:none">
+  <div class="page-title">📖 Help & Manual</div>
+  <div style="display:grid;grid-template-columns:180px 1fr;gap:24px;margin-top:16px">
+    <div id="help-toc" style="position:sticky;top:0;align-self:start">
+      <div onclick="showHelpSection('scan')" class="help-toc-item">🔍 Scan</div>
+      <div onclick="showHelpSection('results')" class="help-toc-item">📊 Results</div>
+      <div onclick="showHelpSection('rules')" class="help-toc-item">📁 Rules</div>
+      <div onclick="showHelpSection('preview')" class="help-toc-item">👁 Preview</div>
+      <div onclick="showHelpSection('execute')" class="help-toc-item">⚡ Execute</div>
+      <div onclick="showHelpSection('crosspath')" class="help-toc-item">🔀 Cross-Path</div>
+      <div onclick="showHelpSection('structure')" class="help-toc-item">🗂 Structure</div>
+      <div onclick="showHelpSection('duplicates')" class="help-toc-item">🔁 Duplicates</div>
+      <div onclick="showHelpSection('unknown')" class="help-toc-item">⚠ Unknown</div>
+      <div onclick="showHelpSection('settings')" class="help-toc-item">⚙ Settings</div>
+      <div onclick="showHelpSection('mockdata')" class="help-toc-item">🧪 Mock Data</div>
+      <div onclick="showHelpSection('profiles')" class="help-toc-item">🏷 Run Profiles</div>
+    </div>
+    <div id="help-content"></div>
+  </div>
+</section>
+
 </body>
 </html>

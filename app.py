@@ -246,6 +246,44 @@ async def api_put_rules(body: RulesUpdate):
 
 
 # ---------------------------------------------------------------------------
+# API: Run Profiles
+# ---------------------------------------------------------------------------
+
+@app.get("/api/profiles")
+async def api_get_profiles():
+    from planner.profiles import PROFILES
+    return [
+        {
+            "id": p.id,
+            "name": p.name,
+            "description": p.description,
+            "icon": p.icon,
+            "allowed_scope_modes": p.allowed_scope_modes,
+            "default_scope_mode": p.default_scope_mode,
+        }
+        for p in PROFILES
+    ]
+
+
+@app.post("/api/profiles/{profile_id}/generate-rules")
+async def api_generate_rules(profile_id: str):
+    from planner.profiles import get_profile
+    from planner.rules import Rule
+    profile = get_profile(profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    added = []
+    for rule_dict in profile.rule_bundle:
+        rule = Rule.from_dict(rule_dict)
+        rule.enabled = False
+        rm = RuleManager(str(BASE_DIR / "rules.json"))
+        rm.add_rule(rule)
+        added.append(rule.id)
+    rm.save()
+    return {"added": added, "count": len(added)}
+
+
+# ---------------------------------------------------------------------------
 # API: Preview (planner)
 # ---------------------------------------------------------------------------
 
