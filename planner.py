@@ -183,6 +183,59 @@ def plan_from_manifest(
             else:
                 dup_resolution[path] = "delete"
 
+    # Inject is_duplicate flag into files for rule matching
+    for f in files:
+        src = f.get("path", "")
+        dup_status = dup_resolution.get(src)
+        if dup_status:
+            f["is_duplicate"] = dup_status == "delete"
+        else:
+            f["is_duplicate"] = False
+
+    plan: list[dict] = []
+
+    for file in files:
+        src = file.get("path", "")
+
+        # Duplicate resolution takes priority
+        dup_status = dup_resolution.get(src)
+        if dup_status == "delete":
+            plan.append({
+                "action": "delete",
+                "src": src,
+                "dst": "",
+                "rule_matched": "_duplicate_resolution",
+                "status": "pending",
+                "conflict_mode": "rename",
+            })
+            continue
+
+        # Try each rule in order
+        matched_rule = None
+        for rule in rules:
+            if not rule.get("enabled", True):
+                continue
+            if evaluate_rule(file, rule):
+                matched_rule = rule
+                break
+
+        if matched_rule is None:
+            # No rule matched — skip
+            plan.append({
+                "action": "skip",
+                "src": src,
+                "dst": "",
+                "rule_matched": None,
+                "status": "pending",
+                "conflict_mode": "rename",
+            })
+            continue
+        for i, path in enumerate(group_files):
+            if i == 0:
+                dup_resolution[path] = "keep"
+            else:
+                dup_resolution[path] = "delete"
+
     plan: list[dict] = []
 
     for file in files:

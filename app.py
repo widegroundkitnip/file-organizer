@@ -224,16 +224,23 @@ async def api_list_scans():
 
 @app.get("/api/rules")
 async def api_get_rules():
-    settings = load_settings()
-    return {"rules": settings.get("rules", [])}
+    rm = RuleManager(str(BASE_DIR / "rules.json"))
+    return {"rules": [r.to_dict() for r in rm.rules]}
 
 
 @app.put("/api/rules")
 async def api_put_rules(body: RulesUpdate):
-    settings = load_settings()
-    settings["rules"] = body.rules
-    save_settings(settings)
-    return {"status": "ok", "rules": body.rules}
+    from planner.rules import Rule, FilterCondition
+    rules = []
+    for r in body.rules:
+        r = dict(r)
+        if r.get("filter"):
+            r["filter"] = FilterCondition(**r["filter"])
+        rules.append(Rule(**r))
+    rm = RuleManager(str(BASE_DIR / "rules.json"))
+    rm.rules = rules
+    rm.save()
+    return {"status": "ok", "rules": [r.to_dict() for r in rm.rules]}
 
 
 # ---------------------------------------------------------------------------

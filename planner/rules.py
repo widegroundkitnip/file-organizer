@@ -37,6 +37,16 @@ class FilterCondition:
             return any(c.matches(file) for c in (self.values or []))
         elif self.type == "none_of":
             return not any(c.matches(file) for c in (self.values or []))
+        elif self.type == "no_extension":
+            # Files with no extension
+            name = file.get("name", "")
+            return "." not in name
+        elif self.type == "default":
+            # Catch-all — always matches (for fallback rules)
+            return True
+        elif self.type == "duplicate":
+            # Files that are duplicates (flagged in manifest)
+            return file.get("is_duplicate", False)
         return False
 
 
@@ -49,6 +59,7 @@ class Rule:
     filter: Optional[FilterCondition] = None
     destination_template: str = ""
     conflict_mode: str = "rename"  # rename | skip | overwrite
+    action: str = "move"  # move | skip | delete
     tags: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -86,46 +97,67 @@ class RuleManager:
 
     def _default_rules(self) -> List[Rule]:
         return [
-            Rule(
-                id=str(uuid.uuid4()),
-                name="Images → Images",
-                enabled=True,
-                priority=0,
-                filter=FilterCondition(type="extension", values=["jpg","jpeg","png","gif","webp","bmp","tiff","raw","heic"]),
-                destination_template="{category}/Images/{name}.{ext}",
-                conflict_mode="rename",
-                tags=["media"]
-            ),
-            Rule(
-                id=str(uuid.uuid4()),
-                name="Documents → Documents",
-                enabled=True,
-                priority=1,
-                filter=FilterCondition(type="extension", values=["pdf","doc","docx","txt","md","rtf","odt"]),
-                destination_template="{category}/Documents/{name}.{ext}",
-                conflict_mode="rename",
-                tags=["media"]
-            ),
-            Rule(
-                id=str(uuid.uuid4()),
-                name="Code → Code",
-                enabled=True,
-                priority=2,
-                filter=FilterCondition(type="extension", values=["py","js","ts","java","c","cpp","go","rs","rb","sh","bash"]),
-                destination_template="{category}/Code/{name}.{ext}",
-                conflict_mode="rename",
-                tags=["media"]
-            ),
-            Rule(
-                id=str(uuid.uuid4()),
-                name="Archives → Archives",
-                enabled=True,
-                priority=3,
-                filter=FilterCondition(type="extension", values=["zip","tar","gz","rar","7z"]),
-                destination_template="{category}/Archives/{name}.{ext}",
-                conflict_mode="rename",
-                tags=["media"]
-            ),
+            # ── Skip / Protected ──────────────────────────────────────
+            Rule(id=str(uuid.uuid4()), name="Protected Files", enabled=True, priority=0,
+                 filter=FilterCondition(type="extension", values=["env","ini","cfg","toml","gitignore","gitattributes"]),
+                 destination_template="", action="skip", conflict_mode="skip", tags=["protected"]),
+            Rule(id=str(uuid.uuid4()), name="Keep Tagged", enabled=True, priority=1,
+                 filter=FilterCondition(type="name_contains", values=["KEEP","TODO","WIP","DRAFT"]),
+                 destination_template="", action="skip", conflict_mode="skip", tags=["protected"]),
+
+            # ── Type Sorting ─────────────────────────────────────────
+            Rule(id=str(uuid.uuid4()), name="Images", enabled=True, priority=10,
+                 filter=FilterCondition(type="extension", values=["jpg","jpeg","png","webp","heic","gif","bmp","tiff","raw"]),
+                 destination_template="{category}/Images/{name}.{ext}", conflict_mode="rename", tags=["media"]),
+            Rule(id=str(uuid.uuid4()), name="Videos", enabled=True, priority=11,
+                 filter=FilterCondition(type="extension", values=["mp4","mov","mkv","avi","webm","flv","wmv","m4v"]),
+                 destination_template="{category}/Videos/{name}.{ext}", conflict_mode="rename", tags=["media"]),
+            Rule(id=str(uuid.uuid4()), name="Documents", enabled=True, priority=12,
+                 filter=FilterCondition(type="extension", values=["pdf","docx","txt","md","doc","odt","rtf","xlsx","xls","pptx","ppt"]),
+                 destination_template="{category}/Documents/{name}.{ext}", conflict_mode="rename", tags=["docs"]),
+            Rule(id=str(uuid.uuid4()), name="Audio", enabled=True, priority=13,
+                 filter=FilterCondition(type="extension", values=["mp3","wav","m4a","aac","flac","ogg","wma","aiff"]),
+                 destination_template="{category}/Audio/{name}.{ext}", conflict_mode="rename", tags=["media"]),
+            Rule(id=str(uuid.uuid4()), name="Code", enabled=True, priority=14,
+                 filter=FilterCondition(type="extension", values=["py","js","ts","jsx","tsx","java","c","cpp","h","hpp","go","rs","rb","php","swift","kt","scala","sh","bash","zsh","css","html","xml","yaml","yml","toml","json","sql","r","m"]),
+                 destination_template="{category}/Code/{name}.{ext}", conflict_mode="rename", tags=["code"]),
+            Rule(id=str(uuid.uuid4()), name="Notebooks", enabled=True, priority=15,
+                 filter=FilterCondition(type="extension", values=["ipynb"]),
+                 destination_template="{category}/Code/Notebooks/{name}.{ext}", conflict_mode="rename", tags=["code"]),
+            Rule(id=str(uuid.uuid4()), name="Archives", enabled=True, priority=16,
+                 filter=FilterCondition(type="extension", values=["zip","rar","7z","tar","gz","bz2","xz","dmg","iso"]),
+                 destination_template="{category}/Archives/{name}.{ext}", conflict_mode="rename", tags=["data"]),
+            Rule(id=str(uuid.uuid4()), name="Datasets", enabled=True, priority=17,
+                 filter=FilterCondition(type="extension", values=["csv","xlsx","parquet","jsonl","feather","pickle","pkl"]),
+                 destination_template="{category}/Datasets/{name}.{ext}", conflict_mode="rename", tags=["data"]),
+            Rule(id=str(uuid.uuid4()), name="Design Assets", enabled=True, priority=18,
+                 filter=FilterCondition(type="extension", values=["psd","ai","fig","sketch","afdesign","xd"]),
+                 destination_template="{category}/Assets/Design/{name}.{ext}", conflict_mode="rename", tags=["assets"]),
+            Rule(id=str(uuid.uuid4()), name="Fonts", enabled=True, priority=19,
+                 filter=FilterCondition(type="extension", values=["ttf","otf","woff","woff2","eot"]),
+                 destination_template="{category}/Assets/Fonts/{name}.{ext}", conflict_mode="rename", tags=["assets"]),
+            Rule(id=str(uuid.uuid4()), name="Executables", enabled=True, priority=20,
+                 filter=FilterCondition(type="extension", values=["exe","msi","app","dmg","pkg","deb","rpm","apk"]),
+                 destination_template="{category}/Apps/{name}.{ext}", conflict_mode="rename", tags=["apps"]),
+
+            # ── Special Rules ─────────────────────────────────────────
+            Rule(id=str(uuid.uuid4()), name="Screenshots", enabled=True, priority=50,
+                 filter=FilterCondition(type="name_contains", values=["Screenshot","Skärmbild","Skärmavbild"]),
+                 destination_template="{category}/Screenshots/{year}/{month}/{name}.{ext}", conflict_mode="rename", tags=["special","images"]),
+            Rule(id=str(uuid.uuid4()), name="Camera Photos", enabled=True, priority=51,
+                 filter=FilterCondition(type="name_contains", values=["IMG_","DSC_","PICT_","DSC0"]),
+                 destination_template="{category}/Camera/{year}/{month}/{name}.{ext}", conflict_mode="rename", tags=["special","images"]),
+            Rule(id=str(uuid.uuid4()), name="Temp Files", enabled=True, priority=95,
+                 filter=FilterCondition(type="extension", values=["tmp","temp","log","cache","lock","bak","old","swp","swo"]),
+                 destination_template="{category}/Temp/{name}.{ext}", conflict_mode="rename", tags=["temp"]),
+
+            # ── Fallback ───────────────────────────────────────────────
+            Rule(id=str(uuid.uuid4()), name="Unknown / No Extension", enabled=True, priority=98,
+                 filter=FilterCondition(type="no_extension"),
+                 destination_template="{category}/Unknown/{name}", conflict_mode="skip", tags=["unknown"]),
+            Rule(id=str(uuid.uuid4()), name="Fallback", enabled=True, priority=99,
+                 filter=FilterCondition(type="default"),
+                 destination_template="{category}/{name}.{ext}", conflict_mode="rename", tags=["fallback"]),
         ]
 
     def add_rule(self, rule: Rule):

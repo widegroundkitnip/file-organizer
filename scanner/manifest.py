@@ -28,6 +28,7 @@ class ScannedFile:
     classification: str = "known"  # known | unknown | system
     is_symlink: bool = False
     symlink_target: Optional[str] = None
+    is_duplicate: bool = False
     depth: int = 0
 
 @dataclass
