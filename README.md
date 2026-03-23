@@ -7,7 +7,7 @@ A fast, local-first file intelligence platform. Scan, understand, deduplicate, o
 ## Quick Start
 
 ```bash
-pip install -r requirements.txt
+pip3 install -r requirements.txt --break-system-packages
 uvicorn app:app --host 0.0.0.0 --port 3001 --reload
 # → http://localhost:3001
 ```
