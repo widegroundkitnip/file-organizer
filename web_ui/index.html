@@ -52,43 +52,43 @@
       <span>File Organizer</span>
     </div>
     <nav class="sidebar-nav">
-      <button class="nav-item active" data-page="scan" onclick="navigate('scan')" data-tooltip="Scan a folder and find duplicates">
+      <button class="nav-item active" data-page="scan" onclick="navigate('scan')">
         <span class="nav-icon">🔍</span>
         <span>Scan</span>
       </button>
-      <button class="nav-item" data-page="results" onclick="navigate('results')" data-tooltip="View scan results and file details">
+      <button class="nav-item" data-page="results" onclick="navigate('results')">
         <span class="nav-icon">📊</span>
         <span>Results</span>
       </button>
-      <button class="nav-item" data-page="rules" onclick="navigate('rules')" data-tooltip="Define how files should be organized">
+      <button class="nav-item" data-page="rules" onclick="navigate('rules')">
         <span class="nav-icon">📋</span>
         <span>Rules</span>
       </button>
-      <button class="nav-item" data-page="preview" onclick="navigate('preview')" data-tooltip="Review the plan before executing">
+      <button class="nav-item" data-page="preview" onclick="navigate('preview')">
         <span class="nav-icon">👁</span>
         <span>Preview</span>
       </button>
-      <button class="nav-item" data-page="execute" onclick="navigate('execute')" data-tooltip="Run the plan and organize files">
+      <button class="nav-item" data-page="execute" onclick="navigate('execute')">
         <span class="nav-icon">⚡</span>
         <span>Execute</span>
       </button>
-      <button class="nav-item" data-page="crosspath" onclick="navigate('crosspath')" data-tooltip="Compare multiple folders for duplicates">
+      <button class="nav-item" data-page="crosspath" onclick="navigate('crosspath')">
         <span class="nav-icon">📁</span>
         <span>Cross-Path</span>
       </button>
-      <button class="nav-item" data-page="structure" onclick="navigate('structure')" data-tooltip="View folder structure and find issues">
+      <button class="nav-item" data-page="structure" onclick="navigate('structure')">
         <span class="nav-icon">🗂</span>
         <span>Structure</span>
       </button>
-      <button class="nav-item" data-page="duplicates" onclick="navigate('duplicates')" data-tooltip="Browse duplicate files by type">
+      <button class="nav-item" data-page="duplicates" onclick="navigate('duplicates')">
         <span class="nav-icon">📋</span>
         <span>Duplicates</span>
       </button>
-      <button class="nav-item" data-page="unknown" onclick="navigate('unknown')" data-tooltip="Files with no recognized extension">
+      <button class="nav-item" data-page="unknown" onclick="navigate('unknown')">
         <span class="nav-icon">⚠</span>
         <span>Unknown</span>
       </button>
-      <button class="nav-item" data-page="settings" onclick="navigate('settings')" data-tooltip="Configure boundaries and options">
+      <button class="nav-item" data-page="settings" onclick="navigate('settings')">
         <span class="nav-icon">⚙</span>
         <span>Settings</span>
       </button>
@@ -108,7 +108,9 @@
       <div class="card">
         <div class="form-group">
           <label>Folder Path</label>
-          <input type="text" id="scan-path" data-tooltip="Enter the full path to the folder you want to scan. Can be any directory on your system." placeholder="/home/user/Downloads" style="font-family: monospace">
+          <input type="text" id="scan-path" placeholder="/home/user/Downloads" style="font-family: monospace;flex:1">
+          <input type="file" id="scan-path-browse" webkitdirectory style="display:none" onchange="handleBrowseFolder(this, 'scan-path')">
+          <button class="btn btn-secondary" onclick="document.getElementById('scan-path-browse').click()" style="white-space:nowrap">📁 Browse</button>
         </div>
 
         <div class="form-group">
@@ -128,7 +130,7 @@
         </div>
 
         <div class="btn-group">
-          <button class="btn btn-primary" id="btn-scan" data-tooltip="Start scanning the selected folder. Takes longer on large directories." onclick="startScan()">🔍 Start Scan</button>
+          <button class="btn btn-primary" id="btn-scan" onclick="startScan()">🔍 Start Scan</button>
         </div>
 
         <div id="scan-progress" class="hidden" style="margin-top:14px">
@@ -158,7 +160,7 @@
 
       <div class="card" style="margin-bottom:16px">
         <div class="form-group" style="margin-bottom:0">
-          <input type="text" id="results-search" data-tooltip="Search file names in the current results." placeholder="🔍 Search files…" style="width:100%;padding:8px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--text)">
+          <input type="text" id="results-search" placeholder="🔍 Search files…" style="width:100%;padding:8px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--text)">
         </div>
       </div>
 
@@ -188,7 +190,7 @@
         <div class="rule-grid">
           <div class="form-group">
             <label>Rule Name</label>
-            <input type="text" id="new-rule-name" data-tooltip="Give this rule a short, recognizable name." placeholder="e.g. PDFs to Documents">
+            <input type="text" id="new-rule-name" placeholder="e.g. PDFs to Documents">
           </div>
           <div class="form-group">
             <label>Category</label>
@@ -204,7 +206,7 @@
           </div>
           <div class="form-group">
             <label>Action Type</label>
-            <select id="new-action-type" data-tooltip="What to do with matched files — move to a folder, rename, or delete.">
+            <select id="new-action-type">
               <option value="move">Move to category folder</option>
               <option value="rename">Rename in place</option>
               <option value="delete">Delete (use with caution)</option>
@@ -212,7 +214,7 @@
           </div>
           <div class="form-group">
             <label>Filter Type</label>
-            <select id="new-filter-type" data-tooltip="Match files by: extension (e.g. .jpg), category (e.g. images), name pattern (e.g. IMG_*), or size range." onchange="updateFilterValueLabel()">
+            <select id="new-filter-type" onchange="updateFilterValueLabel()">
               <option value="extension">Extension</option>
               <option value="name_contains">Name Contains</option>
               <option value="name_pattern">Name Pattern (glob)</option>
@@ -222,7 +224,7 @@
           </div>
           <div class="form-group">
             <label id="filter-value-label">Extensions (comma-separated)</label>
-            <input type="text" id="new-filter-value" data-tooltip="The value to match against. Example: jpg or IMG_ or >10MB." placeholder="pdf, docx">
+            <input type="text" id="new-filter-value" placeholder="pdf, docx">
             <div class="text-sm text-muted" id="filter-value-hint" style="margin-top:4px">e.g. pdf, jpg, png</div>
           </div>
           <div class="form-group">
@@ -236,7 +238,7 @@
           </div>
         </div>
         <div class="btn-group" style="margin-top:8px">
-          <button class="btn btn-primary" data-tooltip="Add this rule to the active rule set." onclick="addRule()">✓ Add Rule</button>
+          <button class="btn btn-primary" onclick="addRule()">✓ Add Rule</button>
           <button class="btn btn-secondary" onclick="showAddRuleForm()">Cancel</button>
         </div>
       </div>
@@ -252,7 +254,7 @@
       <div id="preview-alert"></div>
 
       <div class="btn-group mb-16">
-        <button class="btn btn-primary" id="btn-preview" data-tooltip="See the full list of files that will be affected before executing." onclick="buildPreview()">👁 Build Preview</button>
+        <button class="btn btn-primary" id="btn-preview" onclick="buildPreview()">👁 Build Preview</button>
         <button class="btn btn-secondary" onclick="navigate('rules')">← Back to Rules</button>
         <button class="btn btn-accent" onclick="navigate('execute')">⚡ Go to Execute</button>
       </div>
@@ -334,11 +336,15 @@
       <div class="page-title">📁 Cross-Path Scan</div>
       <div class="page-sub">Select multiple folders to compare. Files shared across folders will appear as duplicates.</div>
       <div id="crosspath-paths" style="margin-top:16px">
-        <input type="text" class="path-input" id="crosspath-input-0" data-tooltip="Add folder paths to compare. At least 2 paths required. Each is scanned fully." placeholder="/path/to/first/folder" style="width:100%;padding:10px;background:var(--surface);color:var(--text);border:1px solid #333;border-radius:8px;margin-bottom:8px">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+          <input type="text" class="path-input" id="crosspath-input-0" placeholder="/path/to/first/folder" style="flex:1;padding:10px;background:var(--surface);color:var(--text);border:1px solid #333;border-radius:8px">
+          <input type="file" id="crosspath-browse-0" webkitdirectory style="display:none" onchange="handleBrowseFolder(this, 'crosspath-input-0')">
+          <button class="btn btn-secondary" onclick="document.getElementById('crosspath-browse-0').click()">📁 Browse</button>
+        </div>
       </div>
       <div style="margin-top:8px">
-        <button onclick="addPathInput()" data-tooltip="Add another folder path to the comparison." class="btn btn-secondary">+ Add Folder</button>
-        <button onclick="runCrossPathScan()" data-tooltip="Scan all folders and find duplicates across them." class="btn btn-primary" style="margin-left:8px">Scan &amp; Compare</button>
+        <button onclick="addPathInput()" class="btn btn-secondary">+ Add Folder</button>
+        <button onclick="runCrossPathScan()" class="btn btn-primary" style="margin-left:8px">Scan &amp; Compare</button>
       </div>
       <div id="crosspath-results" style="margin-top:24px"></div>
     </section>

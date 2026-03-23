@@ -44,6 +44,9 @@ class FilterCondition:
         elif self.type == "default":
             # Catch-all — always matches (for fallback rules)
             return True
+        elif self.type == "path_contains":
+            path = file.get("path", "")
+            return any(v in path for v in (self.values or []))
         elif self.type == "duplicate":
             # Files that are duplicates (flagged in manifest)
             return file.get("is_duplicate", False)

@@ -852,8 +852,10 @@ function renderSettings() {
         }).join('')}
       </div>
       <div style="display:flex;gap:8px;margin-top:10px">
-        <input type="text" id="set-protected-folder" data-tooltip="Add a folder that should never be modified. Acts as a safety boundary." placeholder="/path/to/safe/folder" style="flex:1;padding:8px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--text)">
-        <button class="btn btn-secondary" data-tooltip="Add this folder to the protected list." onclick="addProtectedFolder()">+ Add</button>
+        <input type="text" id="set-protected-folder" placeholder="/path/to/safe/folder" style="flex:1;padding:8px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--text)">
+        <input type="file" id="set-protected-browse" webkitdirectory style="display:none" onchange="handleBrowseFolder(this, 'set-protected-folder')">
+        <button class="btn btn-secondary" onclick="document.getElementById('set-protected-browse').click()">📁 Browse</button>
+        <button class="btn btn-secondary" onclick="addProtectedFolder()">+ Add</button>
       </div>
     </div>
 
@@ -1074,7 +1076,6 @@ function addPathInput() {
   input.className = "path-input";
   input.id = "crosspath-input-" + crosspathInputCount;
   input.placeholder = "/path/to/folder";
-  input.setAttribute('data-tooltip', 'Add folder paths to compare. At least 2 paths required. Each is scanned fully.');
   input.style = "width:100%;padding:10px;background:var(--surface);color:var(--text);border:1px solid #333;border-radius:8px;margin-bottom:8px";
   container.appendChild(input);
   crosspathInputCount++;
@@ -1229,4 +1230,22 @@ function tTN(el) {
   kids.style.display = exp ? "none" : "block";
   var ar = el.querySelector("span");
   if(ar) ar.innerHTML = exp ? "&#9654;" : "&#9660;";
+}
+
+// ── Folder Browse ─────────────────────────────────────────────────────────────
+function handleBrowseFolder(input, targetId) {
+    var files = input.files;
+    if (!files || files.length === 0) return;
+    var dir = files[0].webkitRelativePath.split('/')[0];
+    var target = document.getElementById(targetId);
+    if (target) {
+        // Walk up to find the actual mount point / full path
+        var fullPath = files[0].path || '';
+        if (fullPath) {
+            target.value = fullPath.substring(0, fullPath.indexOf(dir) + dir.length) || dir;
+        } else {
+            target.value = '/' + dir;
+        }
+    }
+    input.value = '';
 }
