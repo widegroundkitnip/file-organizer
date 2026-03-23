@@ -266,10 +266,19 @@ async def api_get_rules():
 @app.put("/api/rules")
 async def api_put_rules(body: RulesUpdate):
     from planner.rules import Rule
-    rules = [Rule.from_dict(r) for r in body.rules]
+    rules = []
+    for i, r in enumerate(body.rules):
+        try:
+            rules.append(Rule.from_dict(r))
+        except Exception as e:
+            raise HTTPException(400, detail=f"Rule #{i} ('{r.get('name','?')}'): {e}")
     rm = RuleManager(str(BASE_DIR / "rules.json"))
-    rm.rules = rules
-    rm.save()
+    try:
+        rm.rules = rules
+        rm.save()
+    except Exception as e:
+        logger.error(f"[RULES] Failed to save rules: {e}")
+        raise HTTPException(500, detail=f"Failed to save rules: {e}")
     return {"status": "ok", "rules": [r.to_dict() for r in rm.rules]}
 
 
