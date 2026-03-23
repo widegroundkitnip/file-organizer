@@ -2,7 +2,7 @@ import json
 import uuid
 import fnmatch
 import re
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, fields
 from typing import List, Dict, Optional, Any
 from pathlib import Path
 
@@ -86,6 +86,11 @@ class Rule:
             f = d["filter"]
             if isinstance(f, dict):
                 d["filter"] = cls._dict_to_filter(f)
+        # Strip fields that are not part of the Rule dataclass (e.g. 'category' from UI forms)
+        known = {f.name for f in fields(Rule)}
+        for k in list(d.keys()):
+            if k not in known:
+                del d[k]
         return cls(**d)
 
     @classmethod
