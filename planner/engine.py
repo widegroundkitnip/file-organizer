@@ -11,9 +11,11 @@ class Action:
     action: str  # move | delete | skip | unknown_review
     src: str = ""
     dst: str = ""
-    rule_matched: str = ""
-    rule_id: str = ""
-    status: str = "pending"  # pending | ok | conflict | error | blocked_boundary | blocked_unknown
+    rule_matched: str = ""      # human-readable rule name (e.g. "Screenshots")
+    rule_id: str = ""            # rule UUID
+    rule_name: str = ""          # alias for rule_matched (frontend uses this)
+    rule_match_reason: str = ""  # e.g. "name_contains: 'Screenshot'"
+    status: str = "pending"      # pending | ok | conflict | error | blocked_boundary | blocked_unknown
     conflict_mode: str = "rename"
     error_reason: str = ""
     classification: str = "known"  # known | unknown | system
@@ -52,6 +54,55 @@ def check_unknown_files(manifest_files: List[dict], actions: List[Action]) -> Li
             action.status = "pending"
             action.classification = "unknown"
     return actions
+
+
+def _build_match_reason(filter_cond, file: dict) -> str:
+    """Build a human-readable string describing why a filter matched."""
+    if not filter_cond:
+        return "no filter"
+    t = filter_cond.type
+    if t == "extension":
+        vals = filter_cond.values or []
+        return f"extension: .{', .'.join(v.lstrip('.') for v in vals)}"
+    elif t == "name_contains":
+        vals = filter_cond.values or []
+        return f"name contains: {vals!r}"
+    elif t == "name_pattern":
+        vals = filter_cond.values or []
+        return f"name pattern: {vals[0] if vals else ''}"
+    elif t == "path_contains":
+        vals = filter_cond.values or []
+        return f"path contains: {vals!r}"
+    elif t == "size_gt":
+        return f"size > {filter_cond.value} bytes"
+    elif t == "size_lt":
+        return f"size < {filter_cond.value} bytes"
+    elif t == "modified_after":
+        return f"modified after {filter_cond.value}"
+    elif t == "modified_before":
+        return f"modified before {filter_cond.value}"
+    elif t == "created_after":
+        return f"created after {filter_cond.value}"
+    elif t == "created_before":
+        return f"created before {filter_cond.value}"
+    elif t == "modified_within_days":
+        return f"modified within {filter_cond.value} days"
+    elif t == "all_of":
+        parts = [_build_match_reason(c, file) for c in (filter_cond.values or [])]
+        return f"all_of({', '.join(parts)})"
+    elif t == "any_of":
+        parts = [_build_match_reason(c, file) for c in (filter_cond.values or [])]
+        return f"any_of({', '.join(parts)})"
+    elif t == "none_of":
+        parts = [_build_match_reason(c, file) for c in (filter_cond.values or [])]
+        return f"none_of({', '.join(parts)})"
+    elif t == "duplicate":
+        return "is duplicate"
+    elif t == "no_extension":
+        return "no extension"
+    elif t == "default":
+        return "default rule"
+    return f"filter:{t}"
 
 
 def plan_from_manifest(
@@ -100,7 +151,9 @@ def plan_from_manifest(
             if rule.filter and not rule.filter.matches(file):
                 continue
 
-            # Rule matched
+            # Rule matched — build a human-readable match reason
+            rule_match_reason = _build_match_reason(rule.filter, file)
+
             dst = apply_template(rule.destination_template, file, default_category)
             if not dst.startswith("/"):
                 dst = os.path.join(default_output_dir, dst)
@@ -111,6 +164,8 @@ def plan_from_manifest(
                 dst=dst,
                 rule_matched=rule.name,
                 rule_id=rule.id,
+                rule_name=rule.name,
+                rule_match_reason=rule_match_reason,
                 status="pending",
                 conflict_mode=rule.conflict_mode,
                 classification="known",

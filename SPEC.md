@@ -1,6 +1,148 @@
 # File Organizer & Deduper — Product Specification
-**Version 3.0** | **2026-03-22**
-**Phase 3 + v2 Vision**
+**Version 3.1** | **2026-03-23**
+**Phase 3.1 + v2 Vision**
+
+---
+
+## Implemented
+
+### Architecture
+- `organizer.py` — Phase 1 scan engine
+- `executor.py` — Phase 2 execution engine
+- `planner/` — Phase 3 rule engine (`engine.py`, `templates.py`, `rules.py`)
+- `scanner/` — Phase 3 cross-path scan engine (`manifest.py`, `duplicate.py`, `structure.py`)
+- `app.py` — FastAPI web app (Phase 3)
+- `web_ui/` — Web frontend (vanilla JS SPA)
+- `settings.json` — User settings persistence
+- `rules.json` — Rule definitions persistence
+
+### File Type Classification ✓
+Every file is classified as **Known**, **Unknown**, or **System**.
+- **Known** files: recognized extension → subject to normal rules and auto-actions
+- **Unknown** files: no extension or unrecognised → never auto-moved/deleted, surfaced for review
+- **System** files: `.pyc`, `.DS_Store`, `.lock`, `.tmp` etc. → protected
+
+### Unknown File Behavior ✓
+- Never included in auto-action plans
+- Listed in "Unknown" page of UI
+- Keep/Delete buttons per file (approve → Unknown/Approved, reject → Trash)
+- Preview shows "⚠ Unknown" badge on unknown files
+
+### Parent Folder Boundaries ✓
+- Folders can be marked as boundaries (stored in `settings.json`)
+- Cross-boundary moves/deletes are blocked with `blocked_boundary` status
+- Visual lock indicator in UI
+
+### Duplicate Detection ✓ (Tiers 1–3)
+- **Tier 1** (Exact): SHA256 hash match
+- **Tier 2** (Likely): same filename + size
+- **Tier 3** (Similar): same extension + Levenshtein name proximity
+- Cross-path duplicate detection via `scanner/duplicate.py`
+
+### Rule Engine (`planner/`) ✓
+- Filter condition types: `extension`, `name_contains`, `name_pattern`, `path_contains`, `size_gt`, `size_lt`, `modified_after/before`, `created_after/before`, `modified_within_days`, `all_of`, `any_of`, `none_of`, `no_extension`, `duplicate`, `default`
+- Destination templates: `{category}`, `{name}`, `{ext}`, `{year}`, `{month}`, `{day}`, `{parent}`, `{tree}`, `{depth}`, `{size_human}`
+- First-matching-rule-wins priority ordering
+- Conflict modes: `rename` (default), `skip`, `overwrite`
+
+### Structure Analyzer (`scanner/structure.py`) ✓ (basic)
+- Folder depth, file count, total size statistics
+- Issue detection: deep nesting, large singular dirs, venv detection
+
+### Web UI Pages ✓
+1. **Scan** — Select folder(s), mode, include/exclude
+2. **Results** — File tree, categories, duplicate groups
+3. **Rules** — Rule builder with filter type/value editor
+4. **Preview** — Action plan review with filter bar, select all/none, bulk actions; **rule name + match reason shown per file**
+5. **Execute** — Progress, live feed, dry-run, undo
+6. **Cross-Path Scan** — Multi-folder selection, duplicate groups by tier
+7. **Structure** — Folder tree with issue markers
+8. **Unknown** — Unknown file list with **Keep/Delete** approve/reject buttons
+9. **Settings** — Output dir, conflict mode, protected folders, theme colours
+
+### API Endpoints ✓
+- `POST /api/scan` — single folder scan
+- `POST /api/scan/multi` — cross-path scan
+- `GET /api/manifest/{id}` — load manifest
+- `GET /api/scans` — list scans
+- `POST /api/plan` — generate action plan (returns `rule_name`, `rule_match_reason`)
+- `POST /api/preview` — build preview
+- `POST /api/execute` — execute plan (dry-run by default)
+- `GET/PUT /api/rules` — load/save rules
+- `GET/PUT /api/settings` — load/save settings
+- `GET/POST /api/settings/parent-folders` — boundary management
+
+### Output Modes ✓
+- **Separate output directory** (default): files copied/moved to new base path
+- **Dry-run by default**: execution never auto-modifies files without explicit opt-in
+
+### Theme / UI
+- CSS custom properties for colours
+- Dark theme default
+- Responsive single-page layout
+
+---
+
+## Planned (Phase v2 / v3+)
+
+### Boundary Behavior Matrix UI
+- Visual crossing-warning cards in Preview when an action would cross a boundary
+- "Blocked Actions" section on Execute page
+
+### Tier 4 — Semantic Duplicate Detection (AI)
+- Perceptual hash (pHash) for image similarity
+- Embedding similarity for text/code files (local LLM or TF-IDF fallback)
+- Requires `ai/` module
+
+### AI Layer (`ai/`) — Phase v2
+- **Rule Learner**: observes approved actions → suggests new rules
+- **Structure Analyzer**: identifies deep chains, redundant nesting, inconsistent naming
+- **Duplicate Summarizer**: groups duplicates by origin, estimates space savings
+- **Auto-Organizer**: "organize my Downloads by month and type" → generates rules
+- **Image Comparator**: pHash + CNN feature similarity, visual diff map
+- **File Semantic Comparer**: embedding/TF-IDF similarity for text and code
+- AI provider UI: API key input, OAuth flows for OpenAI/Anthropic/Google, local Ollama/LM Studio support
+
+### Output Mode 3 — Ask Per Folder (Hybrid)
+- User selects specific parent folders each with own output configuration
+- Prompt: "What do you want to do with Prospero/Mplug?"
+
+### Enhanced Structure Analyzer
+- `similar_subtrees` detection: two subtrees with >50% file overlap
+- `empty_dir`, `hidden_heavy` issue types
+- Recommendations panel with estimated impact
+
+### Enhanced UI Pages
+- **Page 2b: Structure Analysis** — visual tree map, severity highlights, drill-down, "Apply AI Suggestions"
+- **Page 2c: Cross-Path Scan** — matrix view of folder overlaps, shared subpath browser
+- **Page 2d: Duplicate Browser (Enhanced)** — group view with tier filter, bulk actions, "Keep Earliest/Latest/Tree:X" shortcuts
+
+### Settings Schema — Full Implementation
+- `scan.large_file_threshold_mb`
+- `scan.hash_cache_enabled`, `scan.hash_cache_dir`
+- `scan.follow_symlinks`
+- `scan.exclude_known_system`
+- `scan.unknown_file_policy`
+- `structure.max_depth_warning`, `structure.large_dir_warning`
+- `structure.detect_similar_subtrees`, `structure.similarity_threshold`
+- Full `categories` subfolder mapping
+- `ai.*` settings block
+
+### Organizational Memory
+- Learns user preferences over time from approved actions
+- Stores persistent rule suggestions
+
+### Plugin System
+- Custom analyzers, custom destinations, third-party integrations
+
+### Streaming JSON for Large Scans
+- 663K files at 4KB avg = ~2.6GB manifest — streaming parse for very large scans
+
+### Cross-Platform Path Handling
+- Windows `\` path normalization before filesystem operations
+
+### Collaborative Rules Sharing
+- Export/import rules as shareable JSON bundles
 
 ---
 

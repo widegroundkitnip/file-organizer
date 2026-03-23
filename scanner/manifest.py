@@ -22,6 +22,8 @@ class ScannedFile:
     ext: str
     size_bytes: int
     modified_ts: str
+    mtime: float = 0.0   # unix timestamp — for date-based filters
+    ctime: float = 0.0   # unix timestamp — for date-based filters
     hash: Optional[str] = None
     prefix_hash: Optional[str] = None
     category: str = "other"
@@ -107,6 +109,8 @@ class ExtendedManifestBuilder:
                     ext=ext,
                     size_bytes=size,
                     modified_ts=modified,
+                    mtime=st.st_mtime,
+                    ctime=st.st_ctime,
                     category=self._category_from_ext(ext),
                     classification=classification,
                     is_symlink=is_symlink,

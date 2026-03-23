@@ -31,6 +31,19 @@ class FilterCondition:
             return size > (self.value or 0)
         elif self.type == "size_lt":
             return size < (self.value or 0)
+        elif self.type == "modified_after":
+            return file.get("mtime", 0) > float(self.value or 0)
+        elif self.type == "modified_before":
+            return file.get("mtime", 0) < float(self.value or 0)
+        elif self.type == "created_after":
+            return file.get("ctime", 0) > float(self.value or 0)
+        elif self.type == "created_before":
+            return file.get("ctime", 0) < float(self.value or 0)
+        elif self.type == "modified_within_days":
+            import time
+            days = int(self.value or 0)
+            threshold = time.time() - days * 86400
+            return file.get("mtime", 0) > threshold
         elif self.type == "all_of":
             return all(c.matches(file) for c in (self.values or []))
         elif self.type == "any_of":

@@ -52,9 +52,11 @@ function navigate(page) {
       var files = data.unknown_files;
       var html = "<div style=\"margin-bottom:12px;color:var(--text)\">" + files.length + " unknown file(s) (" + data.unknown_count + " total)</div>";
       files.forEach(function(f) {
-        html += "<div style=\"padding:6px 0;border-bottom:1px solid #222;font-size:13px;word-break:break-all\">";
-        html += "<span style=\"color:var(--text)\">" + escHtml(f.path) + "</span>";
-        html += " <span style=\"color:#666\">" + fmtSize(f.size) + "</span>";
+        html += "<div style=\"padding:6px 0;border-bottom:1px solid #222;font-size:13px;word-break:break-all;display:flex;align-items:center;gap:8px\">";
+        html += "<span style=\"color:var(--text);flex:1;word-break:break-all\">" + escHtml(f.path) + "</span>";
+        html += "<span style=\"color:#666;white-space:nowrap\">" + fmtSize(f.size) + "</span>";
+        html += "<button onclick=\"approveUnknown(\'" + escHtml(f.path) + "\')\" style=\"background:#22c55e;color:white;border:none;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;white-space:nowrap\">Keep</button>";
+        html += "<button onclick=\"rejectUnknown(\'" + escHtml(f.path) + "\')\" style=\"background:#ef4444;color:white;border:none;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;white-space:nowrap\">Delete</button>";
         html += "</div>";
       });
       el.innerHTML = html;
@@ -630,14 +632,24 @@ function renderPreview(stats) {
     const isDupDelete = item.rule_matched === '_duplicate_resolution' && item.action === 'delete';
     const defaultChecked = item.action === 'move' || (item.action === 'delete' && !isDupDelete);
 
+    // Rule name shown prominently (teal/green) above the file path
+    const ruleName = item.rule_name || item.rule_matched || '';
+    const matchReason = item.rule_match_reason || '';
+    const ruleBadge = ruleName
+      ? `<div style="margin-bottom:4px">
+           <span style="background:#0d9488;color:white;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:bold">${escHtml(ruleName)}</span>
+           ${matchReason ? `<span style="color:#6b7280;font-size:11px;margin-left:6px">via ${escHtml(matchReason)}</span>` : ''}
+         </div>`
+      : '';
+
     return `
       <div class="action-item">
         <input type="checkbox" id="action-cb-${realIdx}" ${isDupKeep ? 'disabled' : ''} ${defaultChecked ? 'checked' : ''}>
         <span class="action-icon">${icon}</span>
         <div class="action-details">
+          ${ruleBadge}
           <div class="action-src">${escHtml(item.src)}</div>
           ${item.dst ? `<div class="action-arrow">↓</div><div class="action-dst">${escHtml(item.dst)}</div>` : ''}
-          ${item.rule_matched ? `<div class="text-sm text-muted" style="margin-top:3px">Rule: ${escHtml(item.rule_matched)}</div>` : ''}
         </div>
         <span class="action-badge ${badgeClass}">${item.action}</span>
       </div>
@@ -1230,6 +1242,65 @@ function tTN(el) {
   kids.style.display = exp ? "none" : "block";
   var ar = el.querySelector("span");
   if(ar) ar.innerHTML = exp ? "&#9654;" : "&#9660;";
+}
+
+// ── Unknown File Approve / Reject ──────────────────────────────────────────
+function approveUnknown(path) {
+  // Create a rule to move this file to Unknown/Approved
+  var template = "Unknown/Approved/{name}.{ext}";
+  api("POST", "/api/plan", {
+    manifest: window.lastCrossPathData ? window.lastCrossPathData.manifest : { files: [] },
+    rules: [{
+      name: "Approve",
+      action: "move",
+      filter: { type: "path_contains", values: [path] },
+      destination_template: template,
+      priority: 1,
+    }],
+    output_dir: "/tmp/file-organizer-output",
+  }).then(function(plan) {
+    // Remove from unknown_files list and re-render
+    if (window.lastCrossPathData && window.lastCrossPathData.unknown_files) {
+      window.lastCrossPathData.unknown_files = window.lastCrossPathData.unknown_files.filter(function(f) {
+        return f.path !== path;
+      });
+      window.lastCrossPathData.unknown_count = Math.max(0, (window.lastCrossPathData.unknown_count || 1) - 1);
+      navigate("unknown");
+    }
+    showAlert("unknown-alert", "success", "Approved: " + path.split("/").pop());
+    console.log("Approved plan:", plan);
+  }).catch(function(err) {
+    showAlert("unknown-alert", "error", "Approve failed: " + err.message);
+  });
+}
+
+function rejectUnknown(path) {
+  // Create a rule to move this file to Trash
+  var template = "Trash/{name}.{ext}";
+  api("POST", "/api/plan", {
+    manifest: window.lastCrossPathData ? window.lastCrossPathData.manifest : { files: [] },
+    rules: [{
+      name: "Reject",
+      action: "move",
+      filter: { type: "path_contains", values: [path] },
+      destination_template: template,
+      priority: 1,
+    }],
+    output_dir: "/tmp/file-organizer-output",
+  }).then(function(plan) {
+    // Remove from unknown_files list and re-render
+    if (window.lastCrossPathData && window.lastCrossPathData.unknown_files) {
+      window.lastCrossPathData.unknown_files = window.lastCrossPathData.unknown_files.filter(function(f) {
+        return f.path !== path;
+      });
+      window.lastCrossPathData.unknown_count = Math.max(0, (window.lastCrossPathData.unknown_count || 1) - 1);
+      navigate("unknown");
+    }
+    showAlert("unknown-alert", "success", "Rejected: " + path.split("/").pop());
+    console.log("Rejected plan:", plan);
+  }).catch(function(err) {
+    showAlert("unknown-alert", "error", "Reject failed: " + err.message);
+  });
 }
 
 // ── Folder Browse ─────────────────────────────────────────────────────────────
