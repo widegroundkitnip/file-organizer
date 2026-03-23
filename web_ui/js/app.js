@@ -42,25 +42,7 @@ function navigate(page) {
   if (page === 'preview' && state.manifest)  renderPreview();
   if (page === 'execute')                    renderExecution();
   if (page === 'settings')                   renderSettings();
-  if (page === "structure") {
-    const data = window.lastCrossPathData;
-    const el = document.getElementById("structure-issues");
-    if (!data || !data.structure) {
-      el.innerHTML = "<div class=\"alert alert-info\">Run a Cross-Path scan first to see structure analysis.</div>";
-    } else {
-      const s = data.structure;
-      let html = "";
-      if (s.issues && s.issues.length > 0) {
-        html += "<div style=\"margin-bottom:12px\">";
-        s.issues.forEach(function(issue) { html += "<div style=\"color:var(--warning);padding:4px 0\">" + escHtml(issue) + "</div>"; });
-        html += "</div>";
-      } else {
-        html = "<div class=\"alert alert-success\">No structural issues found.</div>";
-      }
-      if (s.depth) html += "<div style=\"color:var(--text);font-size:13px;margin-top:8px\">Max depth: " + s.depth + " | Total folders: " + (s.total_folders || "N/A") + "</div>";
-      el.innerHTML = html;
-    }
-  }
+  if (page === "structure") { renderStructureTree(window.lastCrossPathData); }
   if (page === "unknown") {
     const data = window.lastCrossPathData;
     const el = document.getElementById("unknown-files");
@@ -1071,4 +1053,61 @@ function filterDupes(tier) {
   document.querySelectorAll(".dupe-group").forEach(function(el) {
     el.style.display = (tier === "all" || el.dataset.tier === tier) ? "block" : "none";
   });
+}
+
+function renderStructureTree(data) {
+  var c = document.getElementById("structure-issues");
+  if (!data || !data.structure) {
+    c.innerHTML = "<div class=\"alert alert-info\">Run a Cross-Path scan first to see structure analysis.</div>";
+    return;
+  }
+  var s = data.structure;
+  var html = "<div style=\"display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap\">";
+  html += "<div style=\"flex:1;min-width:100px;background:var(--surface);border:1px solid #333;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:20px;font-weight:bold;color:var(--text)\">" + (s.total_folders||0).toLocaleString() + "</div><div style=\"font-size:11px;color:#666;text-transform:uppercase\">Folders</div></div>";
+  html += "<div style=\"flex:1;min-width:100px;background:var(--surface);border:1px solid #333;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:20px;font-weight:bold;color:var(--text)\">" + (s.depth||0) + "</div><div style=\"font-size:11px;color:#666;text-transform:uppercase\">Max Depth</div></div>";
+  html += "<div style=\"flex:1;min-width:100px;background:var(--surface);border:1px solid #333;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:20px;font-weight:bold;color:var(--text)\">" + (s.total_files||0).toLocaleString() + "</div><div style=\"font-size:11px;color:#666;text-transform:uppercase\">Files</div></div>";
+  html += "<div style=\"flex:1;min-width:100px;background:var(--surface);border:1px solid #333;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:20px;font-weight:bold;color:var(--text)\">" + fmtSize(s.total_size||0) + "</div><div style=\"font-size:11px;color:#666;text-transform:uppercase\">Total Size</div></div>";
+  html += "</div>";
+  if (s.issues && s.issues.length > 0) {
+    html += "<div style=\"margin-bottom:16px\"><strong style=\"color:var(--warning);font-size:13px\">Issues (" + s.issues.length + "):</strong>";
+    s.issues.slice(0,20).forEach(function(i){ html += "<div style=\"color:var(--warning);padding:3px 0;font-size:12px\">! " + escHtml(i) + "</div>"; });
+    if(s.issues.length > 20) html += "<div style=\"color:#555;font-size:12px\">...and " + (s.issues.length-20) + " more</div>";
+    html += "</div>";
+  }
+  if (s.tree && s.tree.length > 0) {
+    html += "<div style=\"margin-top:16px\"><strong style=\"color:var(--text);font-size:13px;margin-bottom:8px;display:block\">Folder Tree:</strong>";
+    s.tree.forEach(function(n){ html += rTN(n, 0); });
+    html += "</div>";
+  } else {
+    html += "<div class=\"alert alert-success\">No structural issues found.</div>";
+  }
+  c.innerHTML = html;
+}
+
+function rTN(node, depth) {
+  var hasKids = node.children && node.children.length > 0;
+  var ind = depth * 18;
+  var clr = node.has_issue ? "var(--error)" : (depth===0 ? "var(--text)" : "#94a3b8");
+  var arrow = hasKids ? "<span style=\"color:#555;margin-right:4px;font-family:monospace\">&#9660;</span>" : "<span style=\"color:#444;margin-right:4px;font-family:monospace\">&#9646;</span>";
+  var rowStyle = "display:flex;align-items:center;padding:5px " + ind + "px;border-radius:4px;cursor:" + (hasKids ? "pointer" : "default") + ";transition:background 0.1s";
+  var h = "<div class=\"tree-node\" style=\"" + rowStyle + "\" onclick=\"tTN(this)\" data-path=\"" + escHtml(node.path||"") + "\">";
+  h += arrow + "<span style=\"color:" + clr + ";font-size:13px;font-weight:" + (depth===0 ? "bold" : "normal") + ";flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\">" + escHtml(node.name||"") + "</span>";
+  h += "<span style=\"color:#555;font-size:11px;margin-left:8px;white-space:nowrap\">" + (node.file_count||0) + " files &middot; " + fmtSize(node.size||0) + "</span>";
+  if(node.has_issue) h += " <span style=\"color:var(--error);font-size:12px\">!</span>";
+  h += "</div>";
+  if(hasKids) {
+    h += "<div class=\"tree-children\" style=\"display:block\">";
+    node.children.forEach(function(c){ h += rTN(c, depth+1); });
+    h += "</div>";
+  }
+  return h;
+}
+
+function tTN(el) {
+  var kids = el.nextElementSibling;
+  if(!kids || !kids.classList.contains("tree-children")) return;
+  var exp = kids.style.display !== "none";
+  kids.style.display = exp ? "none" : "block";
+  var ar = el.querySelector("span");
+  if(ar) ar.innerHTML = exp ? "&#9654;" : "&#9660;";
 }

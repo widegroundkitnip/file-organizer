@@ -126,13 +126,109 @@ class StructureAnalyzer:
         for f in self.files:
             d = f.get("depth", 0) if isinstance(f, dict) else f.depth
             depths.append(d)
+        tree, tree_stats = self._build_tree()
+        issue_paths = {
+            issue.get("path")
+            for issue in self.issues
+            if isinstance(issue, dict) and issue.get("path")
+        }
         return {
             "scan_roots": self.paths,
+            "total_files": len(self.files),
+            "total_folders": tree_stats["total_folders"],
+            "total_size": tree_stats["total_size"],
+            "depth": tree_stats["depth"],
+            "tree": tree,
+            "issues": [issue.get("message", str(issue)) for issue in self.issues],
+            "issues_detail": self.issues,
+            "issue_paths": sorted(issue_paths),
             "stats": {
                 "total_files": len(self.files),
                 "total_roots": len(self.paths),
                 "max_depth": max(depths, default=0),
             },
-            "issues": self.issues,
             "recommendations": self.recommendations,
+        }
+
+    def _build_tree(self) -> tuple[list[dict], dict]:
+        files_by_dir = defaultdict(list)
+        all_dirs = set()
+        issue_paths = {
+            issue.get("path")
+            for issue in self.issues
+            if isinstance(issue, dict) and issue.get("path")
+        }
+
+        for f in self.files:
+            path = f.get("path", "") if isinstance(f, dict) else f.path
+            size = f.get("size_bytes", 0) if isinstance(f, dict) else f.size_bytes
+            parent = os.path.dirname(path)
+            if not parent:
+                continue
+            files_by_dir[parent].append(size)
+
+            cur = parent
+            while cur:
+                all_dirs.add(cur)
+                nxt = os.path.dirname(cur)
+                if nxt == cur:
+                    break
+                cur = nxt
+
+        children = defaultdict(set)
+        for d in all_dirs:
+            parent = os.path.dirname(d)
+            if parent and parent != d:
+                children[parent].add(d)
+
+        def make_node(dir_path: str, depth: int) -> tuple[dict, int]:
+            child_nodes = []
+            folder_total = 0
+            file_count = len(files_by_dir.get(dir_path, []))
+            size_total = sum(files_by_dir.get(dir_path, []))
+            max_depth = depth
+
+            for child in sorted(children.get(dir_path, [])):
+                child_node, child_depth = make_node(child, depth + 1)
+                child_nodes.append(child_node)
+                folder_total += 1 + child_node["folder_count"]
+                file_count += child_node["file_count"]
+                size_total += child_node["size"]
+                if child_depth > max_depth:
+                    max_depth = child_depth
+
+            node_has_issue = any(
+                ip == dir_path or ip.startswith(f"{dir_path}/")
+                for ip in issue_paths
+            )
+            node = {
+                "name": os.path.basename(dir_path.rstrip("/")) or dir_path,
+                "path": dir_path,
+                "file_count": file_count,
+                "folder_count": folder_total,
+                "size": size_total,
+                "has_issue": node_has_issue,
+                "children": child_nodes,
+            }
+            return node, max_depth
+
+        roots = [p.rstrip("/") for p in self.paths if p]
+        root_nodes = []
+        total_folders = 0
+        total_size = 0
+        max_depth = 0
+
+        for root in roots:
+            all_dirs.add(root)
+            node, depth = make_node(root, 0)
+            root_nodes.append(node)
+            total_folders += 1 + node["folder_count"]
+            total_size += node["size"]
+            if depth > max_depth:
+                max_depth = depth
+
+        return root_nodes, {
+            "total_folders": total_folders,
+            "total_size": total_size,
+            "depth": max_depth,
         }
