@@ -56,6 +56,7 @@ function navigate(page) {
         html += "<div style=\"padding:6px 0;border-bottom:1px solid #222;font-size:13px;word-break:break-all;display:flex;align-items:center;gap:8px\">";
         html += "<span style=\"color:var(--text);flex:1;word-break:break-all\">" + escHtml(f.path) + "</span>";
         html += "<span style=\"color:#666;white-space:nowrap\">" + fmtSize(f.size) + "</span>";
+        html += "<button onclick=\"openFolder(\'" + escHtml(f.path) + "\')\" style=\"background:rgba(255,255,255,0.08);border:none;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;color:var(--text);white-space:nowrap\" title=\"Open containing folder\">📁 Open folder</button>";
         html += "<button onclick=\"approveUnknown(\'" + escHtml(f.path) + "\')\" style=\"background:#22c55e;color:white;border:none;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;white-space:nowrap\">Keep</button>";
         html += "<button onclick=\"rejectUnknown(\'" + escHtml(f.path) + "\')\" style=\"background:#ef4444;color:white;border:none;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;white-space:nowrap\">Delete</button>";
         html += "</div>";
@@ -76,9 +77,10 @@ function navigate(page) {
         html += "<div class=\"duplicate-group\" data-tier=\"" + escHtml(tier) + "\" style=\"background:var(--surface);border:1px solid #333;border-radius:8px;padding:12px;margin-bottom:12px\">";
         html += "<div style=\"color:var(--warning);margin-bottom:8px\">Group " + (idx+1) + " -- " + group.files.length + " files</div>";
         group.files.forEach(function(f) {
-          html += "<div style=\"padding:4px 0;border-bottom:1px solid #222;font-size:13px;word-break:break-all\">";
-          html += "<span style=\"color:var(--text)\">" + escHtml(f.path) + "</span>";
-          html += " <span style=\"color:#666\">" + fmtSize(f.size) + "</span>";
+          html += "<div style=\"padding:4px 0;border-bottom:1px solid #222;font-size:13px;word-break:break-all;display:flex;align-items:center;gap:6px\">";
+          html += "<span style=\"color:var(--text);flex:1;word-break:break-all\">" + escHtml(f.path) + "</span>";
+          html += "<span style=\"color:#666;white-space:nowrap\">" + fmtSize(f.size) + "</span>";
+          html += "<button onclick=\"openFolder(\'" + escHtml(f.path) + "\')\" style=\"background:rgba(255,255,255,0.08);border:none;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;color:var(--text);white-space:nowrap\" title=\"Open containing folder\">📁 Open folder</button>";
           html += "</div>";
         });
         html += "</div>";
@@ -1085,6 +1087,25 @@ function showResultNavItems() {
   });
 }
 
+function openFolder(path) {
+  fetch('/api/open-folder?path=' + encodeURIComponent(path)).then(function(r) {
+    if (!r.ok) {
+      var msg = 'Failed to open folder';
+      r.json().catch(function(){}).then(function(d) {
+        if (d && d.detail) msg = d.detail;
+        showAlert('scan-alert', 'error', msg);
+      });
+    }
+  }).catch(function() {
+    showAlert('scan-alert', 'error', 'Could not open folder');
+  });
+}
+  ['crosspath', 'structure', 'duplicates', 'unknown'].forEach(function(page) {
+    var nav = document.querySelector('[data-page="' + page + '"]');
+    if (nav) nav.style.display = '';
+  });
+}
+
 // Stub — previously referenced but not defined; no-op
 function updateIntentScopeVisibility() {}
 
@@ -1117,6 +1138,7 @@ function addPathInput() {
   input.id = "crosspath-input-" + idx;
   input.placeholder = "/path/to/folder";
   input.style = "flex:1;padding:10px;background:var(--surface);color:var(--text);border:1px solid #333;border-radius:8px";
+  // Hidden file input kept only as fallback for webkitdirectory (Chromium)
   const fileInput = document.createElement("input");
   fileInput.type = "file";
   fileInput.id = "crosspath-browse-" + idx;
@@ -1127,7 +1149,7 @@ function addPathInput() {
   btn.className = "btn btn-secondary";
   btn.style = "white-space:nowrap";
   btn.textContent = "📁 Browse";
-  btn.onclick = function() { document.getElementById('crosspath-browse-' + idx).click(); };
+  btn.onclick = function() { asyncBrowseFolderByIndex(idx); };
   row.appendChild(input);
   row.appendChild(fileInput);
   row.appendChild(btn);
@@ -1347,12 +1369,30 @@ function rejectUnknown(path) {
 }
 
 // ── Folder Browse ─────────────────────────────────────────────────────────────
-function browseForFolder(targetInputId) {
-    var path = prompt("Enter the full path to the folder:");
-    if (path) {
-        var el = document.getElementById(targetInputId);
-        if (el) el.value = path;
+async function browseForFolder(targetInputId) {
+    try {
+        var r = await fetch('/api/dialog/folder', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({start_dir: ''})
+        });
+        var d = await r.json();
+        if (d.ok && d.path) {
+            var el = document.getElementById(targetInputId);
+            if (el) el.value = d.path;
+        }
+    } catch(e) {
+        // Fallback: manual path entry
+        var path = prompt("Enter the full path to the folder:");
+        if (path) {
+            var el = document.getElementById(targetInputId);
+            if (el) el.value = path;
+        }
     }
+}
+
+async function asyncBrowseFolderByIndex(idx) {
+    await browseForFolder('crosspath-input-' + idx);
 }
 
 function handleBrowseFolder(input, targetId) {

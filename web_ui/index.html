@@ -442,7 +442,7 @@
         <label style="color:var(--text);font-size:13px;margin-bottom:6px;display:block">Where to create (full path):</label>
         <div style="display:flex;gap:8px">
           <input type="text" id="mock-path" placeholder="/Users/sigge/test_workspace" style="flex:1;padding:10px;background:var(--surface);color:var(--text);border:1px solid #333;border-radius:8px">
-          <button class="btn btn-secondary" onclick="document.getElementById('mock-path').value = prompt('Enter full path:') || document.getElementById('mock-path').value">📁 Browse</button>
+          <button class="btn btn-secondary" onclick="browseForFolder('mock-path')">📁 Browse</button>
         </div>
       </div>
 

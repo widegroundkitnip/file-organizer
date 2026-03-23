@@ -19,6 +19,7 @@ import hashlib
 import json
 import logging
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -626,6 +627,52 @@ async def api_put_settings(body: dict):
 # API: Mock Data Generator
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# API: Native OS Folder Picker (SA-001)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/dialog/folder")
+async def api_folder_picker(req: dict):
+    """Open native OS folder dialog. Returns selected path or null.
+    Uses kdialog on Linux/KDE, or falls back to Python input()."""
+    import subprocess, shlex
+
+    start_dir = os.path.expanduser(req.get("start_dir", os.path.expanduser("~")))
+
+    # Try kdialog (KDE) first
+    try:
+        result = subprocess.run(
+            ["kdialog", "--getexistingdirectory", start_dir, "--title", "Select Folder"],
+            capture_output=True, text=True, timeout=30,
+            env={**os.environ, "DISPLAY": os.environ.get("DISPLAY", "")}
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            path = result.stdout.strip()
+            return {"ok": True, "path": path}
+        # User cancelled
+        return {"ok": False, "path": None}
+    except FileNotFoundError:
+        pass
+
+    # Fallback: use zenity if available
+    try:
+        result = subprocess.run(
+            ["zenity", "--file-selection", "--directory", "--filename", start_dir + "/"],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return {"ok": True, "path": result.stdout.strip()}
+        return {"ok": False, "path": None}
+    except FileNotFoundError:
+        pass
+
+    return {"ok": False, "path": None, "error": "No native folder picker available (install kdialog or zenity)"}
+
+
+# ---------------------------------------------------------------------------
+# API: Mock Data Generator
+# ---------------------------------------------------------------------------
+
 @app.post("/api/mock/create")
 async def api_mock_create(req: dict):
     """Generate mock test workspace. Body: {path: str, size_gb: int, categories: list[str]}"""
@@ -680,6 +727,51 @@ async def api_verify_snapshot(snapshot_id: str, req: dict):
     from planner.snapshot import verify_plan
     result = verify_plan(snapshot_id, req.get("after_manifest", {}))
     return result
+
+
+# ---------------------------------------------------------------------------
+# API: Open Folder (OS file manager)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/open-folder")
+async def api_open_folder(path: str):
+    """Open the containing folder of the given path in the OS file manager."""
+    if not path:
+        raise HTTPException(400, detail="path query parameter required")
+
+    file_path = os.path.expanduser(path)
+    if not os.path.exists(file_path):
+        raise HTTPException(404, detail=f"Path not found: {path}")
+
+    folder = os.path.dirname(file_path) or file_path
+    system = platform.system()
+
+    try:
+        if system == "Darwin":       # macOS
+            subprocess.run(["open", folder], check=True, capture_output=True)
+        elif system == "Windows":    # Windows
+            subprocess.run(["explorer", folder], check=True, capture_output=True)
+        elif system == "Linux":      # Linux — try common file managers
+            managers = ["xdg-open", "nautilus", "dolphin", "thunar", "pcmanfm", "nemo"]
+            opened = False
+            for mgr in managers:
+                try:
+                    subprocess.run([mgr, folder], check=True, capture_output=True)
+                    opened = True
+                    break
+                except (FileNotFoundError, subprocess.CalledProcessError):
+                    continue
+            if not opened:
+                # Last resort: xdg-open (should exist on any X desktop)
+                subprocess.run(["xdg-open", folder], check=True, capture_output=True)
+        else:
+            raise HTTPException(400, detail=f"Unsupported OS: {system}")
+    except FileNotFoundError:
+        raise HTTPException(400, detail=f"No file manager found for path: {folder}")
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(500, detail=f"Failed to open folder: {e}")
+
+    return {"ok": True, "folder": folder}
 
 # ---------------------------------------------------------------------------
 # API: Project Detection
