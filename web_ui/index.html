@@ -40,6 +40,22 @@
         <span class="nav-icon">⚡</span>
         <span>Execute</span>
       </button>
+      <button class="nav-item" data-page="crosspath" onclick="navigate('crosspath')">
+        <span class="nav-icon">📁</span>
+        <span>Cross-Path</span>
+      </button>
+      <button class="nav-item" data-page="structure" onclick="navigate('structure')">
+        <span class="nav-icon">🗂</span>
+        <span>Structure</span>
+      </button>
+      <button class="nav-item" data-page="duplicates" onclick="navigate('duplicates')">
+        <span class="nav-icon">📋</span>
+        <span>Duplicates</span>
+      </button>
+      <button class="nav-item" data-page="unknown" onclick="navigate('unknown')">
+        <span class="nav-icon">⚠</span>
+        <span>Unknown</span>
+      </button>
       <button class="nav-item" data-page="settings" onclick="navigate('settings')">
         <span class="nav-icon">⚙</span>
         <span>Settings</span>
@@ -264,6 +280,46 @@
       <div id="settings-content">
         <div class="empty-state"><div class="spinner"></div></div>
       </div>
+    </section>
+
+    <!-- Cross-Path Scan -->
+    <section class="page" id="page-crosspath">
+      <div class="page-title">📁 Cross-Path Scan</div>
+      <div class="page-sub">Select multiple folders to compare. Files shared across folders will appear as duplicates.</div>
+      <div id="crosspath-paths" style="margin-top:16px">
+        <input type="text" class="path-input" id="crosspath-input-0" placeholder="/path/to/first/folder" style="width:100%;padding:10px;background:var(--surface);color:var(--text);border:1px solid #333;border-radius:8px;margin-bottom:8px">
+      </div>
+      <div style="margin-top:8px">
+        <button onclick="addPathInput()" class="btn btn-secondary">+ Add Folder</button>
+        <button onclick="runCrossPathScan()" class="btn btn-primary" style="margin-left:8px">Scan &amp; Compare</button>
+      </div>
+      <div id="crosspath-results" style="margin-top:24px"></div>
+    </section>
+
+    <!-- Structure Analysis -->
+    <section class="page" id="page-structure">
+      <div class="page-title">🗂 Structure Analysis</div>
+      <div class="page-sub">Understand your folder structure — depth, nesting, similar subtrees, and environments.</div>
+      <div id="structure-issues" style="margin-top:16px"></div>
+    </section>
+
+    <!-- Duplicate Browser -->
+    <section class="page" id="page-duplicates">
+      <div class="page-title">📋 Duplicate Groups</div>
+      <div class="page-sub">Files detected as exact or likely duplicates across scanned folders.</div>
+      <div style="margin-bottom:16px">
+        <button class="btn btn-sm filter-btn active" data-tier="all" onclick="filterDupes('all')">All</button>
+        <button class="btn btn-sm filter-btn" data-tier="exact" onclick="filterDupes('exact')">🔴 Exact (hash)</button>
+        <button class="btn btn-sm filter-btn" data-tier="likely" onclick="filterDupes('likely')">🟡 Likely (name+size)</button>
+      </div>
+      <div id="dupe-groups"></div>
+    </section>
+
+    <!-- Unknown Files -->
+    <section class="page" id="page-unknown">
+      <div class="page-title">⚠ Unknown Files</div>
+      <div class="page-sub" style="color:var(--warning)">These files have no extension or unknown type. No automatic actions will be taken.</div>
+      <div id="unknown-files" style="margin-top:16px"></div>
     </section>
 
   </main>

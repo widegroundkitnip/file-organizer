@@ -40,6 +40,8 @@ function navigate(page) {
   if (page === 'preview' && state.manifest)  renderPreview();
   if (page === 'execute')                    renderExecution();
   if (page === 'settings')                   renderSettings();
+  if (page === "structure") { document.getElementById("structure-issues").innerHTML = "<div class=\"alert alert-info\">Run a Cross-Path scan first to see structure analysis.</div>"; }
+  if (page === "unknown") { document.getElementById("unknown-files").innerHTML = "<div class=\"alert alert-info\">Run a Cross-Path scan first to see unknown files.</div>"; }
 }
 
 // ---------------------------------------------------------------------------
@@ -906,3 +908,76 @@ async function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+// Cross-Path Scan
+let crosspathInputCount = 1;
+
+function addPathInput() {
+  const container = document.getElementById("crosspath-paths");
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "path-input";
+  input.id = "crosspath-input-" + crosspathInputCount;
+  input.placeholder = "/path/to/folder";
+  input.style = "width:100%;padding:10px;background:var(--surface);color:var(--text);border:1px solid #333;border-radius:8px;margin-bottom:8px";
+  container.appendChild(input);
+  crosspathInputCount++;
+}
+
+async function runCrossPathScan() {
+  const resultsDiv = document.getElementById("crosspath-results");
+  resultsDiv.innerHTML = "<div class=\"spinner\"></div> Scanning...";
+  const paths = [];
+  for (let i = 0; i < crosspathInputCount; i++) {
+    const el = document.getElementById("crosspath-input-" + i);
+    if (el && el.value.trim()) paths.push(el.value.trim());
+  }
+  if (paths.length < 2) {
+    resultsDiv.innerHTML = "<div class=\"alert alert-warn\">Need at least 2 folder paths.</div>";
+    return;
+  }
+  try {
+    const data = await api("POST", "/scan/multi", { paths, mode: "basic", include_hidden: false, exclude_dirs: [] });
+    const dupGroups = data.duplicates || [];
+    if (dupGroups.length === 0) {
+      resultsDiv.innerHTML = "<div class=\"alert alert-success\">No duplicates found across the selected folders.</div>";
+    } else {
+      let html = "<div style=\"margin-bottom:16px;color:var(--text)\"><strong>" + dupGroups.length + "</strong> duplicate group(s) found</div>";
+      dupGroups.forEach(function(group, idx) {
+        html += "<div class=\"duplicate-group\" style=\"background:var(--surface);border:1px solid #333;border-radius:8px;padding:12px;margin-bottom:12px\">";
+        html += "<div style=\"color:var(--warning);margin-bottom:8px\">Group " + (idx+1) + " -- " + group.files.length + " files</div>";
+        group.files.forEach(function(f) {
+          html += "<div style=\"padding:4px 0;border-bottom:1px solid #222;font-size:13px;word-break:break-all\">";
+          html += "<span style=\"color:var(--text)\">" + escHtml(f.path) + "</span>";
+          html += " <span style=\"color:#666\">" + fmtSize(f.size) + "</span>";
+          html += "</div>";
+        });
+        html += "</div>";
+      });
+      resultsDiv.innerHTML = html;
+    }
+    const struct = data.structure || {};
+    if (struct.issues && struct.issues.length > 0) {
+      var structHtml = "<div style=\"margin-top:24px\"><strong style=\"color:var(--text)\">Structure issues:</strong>";
+      struct.issues.forEach(function(issue) {
+        structHtml += "<div style=\"color:var(--warning);padding:4px 0\">" + escHtml(issue) + "</div>";
+      });
+      structHtml += "</div>";
+      resultsDiv.innerHTML += structHtml;
+    }
+    if (data.unknown_count > 0) {
+      resultsDiv.innerHTML += "<div style=\"margin-top:16px;color:var(--warning)\">" + data.unknown_count + " unknown file(s) detected</div>";
+    }
+  } catch(err) {
+    resultsDiv.innerHTML = "<div class=\"alert alert-error\">Error: " + escHtml(err.message) + "</div>";
+  }
+}
+
+function filterDupes(tier) {
+  document.querySelectorAll(".filter-btn").forEach(function(b){ b.classList.remove("active"); });
+  var btn = document.querySelector(".filter-btn[data-tier=\""+tier+"\"]");
+  if (btn) btn.classList.add("active");
+  document.querySelectorAll(".dupe-group").forEach(function(el) {
+    el.style.display = (tier === "all" || el.dataset.tier === tier) ? "block" : "none";
+  });
+}

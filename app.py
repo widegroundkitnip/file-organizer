@@ -29,6 +29,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from typing import List
+
+# Phase 3 extended modules
+from scanner import build_cross_manifest, CrossPathDuplicateFinder, StructureAnalyzer
+from planner import plan_from_manifest, RuleManager
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -359,6 +364,169 @@ async def api_execute(req: ExecuteRequest):
 
 
 # ---------------------------------------------------------------------------
+# API: Multi-path scan (Sprint 3)
+# ---------------------------------------------------------------------------
+
+from typing import List
+
+from scanner import build_cross_manifest, CrossPathDuplicateFinder, StructureAnalyzer
+from planner import plan_from_manifest, RuleManager
+
+
+class MultiPathScanRequest(BaseModel):
+    paths: List[str]
+    mode: str = "fast"
+    include_hidden: bool = False
+    exclude_dirs: Optional[List[str]] = None
+    parent_folders: Optional[List[str]] = None
+
+
+class PlanRequest(BaseModel):
+    manifest: dict
+    rules: Optional[list] = None
+    rules_path: str = "rules.json"
+    output_dir: str = "/tmp/file-organizer-output"
+    parent_folders: Optional[List[str]] = None
+    default_category: str = "Other"
+
+
+class BoundaryRequest(BaseModel):
+    action: str  # add | remove | list
+    path: Optional[str] = None
+    settings_path: str = "settings.json"
+
+
+class RulesRequest(BaseModel):
+    rules: list
+    rules_path: str = "rules.json"
+
+
+@app.post("/api/scan/multi")
+async def scan_multi(req: MultiPathScanRequest):
+    """Scan multiple specific paths. Returns full manifest with structure + duplicate analysis."""
+    manifest = build_cross_manifest(
+        paths=req.paths,
+        mode=req.mode,
+        include_hidden=req.include_hidden,
+        exclude_dirs=req.exclude_dirs or [],
+    )
+
+    # Run duplicate detection
+    finder = CrossPathDuplicateFinder(manifest["files"])
+    dupes = finder.find()
+
+    # Run structure analysis
+    analyzer = StructureAnalyzer(manifest, req.paths)
+    structure = analyzer.analyze()
+
+    # Unknown file summary
+    unknown_files = [f for f in manifest["files"] if f.get("classification") in ("unknown", "system")]
+
+    return {
+        "manifest": manifest,
+        "duplicates": dupes,
+        "structure": structure,
+        "unknown_files": unknown_files[:100],
+        "unknown_count": len(unknown_files),
+    }
+
+
+@app.post("/api/plan")
+async def create_plan(req: PlanRequest):
+    """Generate action plan from manifest + rules."""
+    if req.rules is not None:
+        from planner.rules import Rule, FilterCondition
+        rules = []
+        for r in list(req.rules):
+            r = dict(r)
+            if r.get("filter"):
+                r["filter"] = FilterCondition(**r["filter"])
+            rules.append(Rule(**r))
+    else:
+        rm = RuleManager(req.rules_path)
+        rules = rm.rules
+
+    plan = plan_from_manifest(
+        manifest=req.manifest,
+        rules=rules,
+        default_output_dir=req.output_dir,
+        parent_folders=req.parent_folders or [],
+        default_category=req.default_category,
+    )
+    return plan
+
+
+@app.get("/api/settings/parent-folders")
+async def list_parent_folders(settings_path: str = "settings.json"):
+    """Return current parent folder boundaries."""
+    sp = Path(settings_path) if not Path(settings_path).is_absolute() else Path(settings_path)
+    if not sp.exists():
+        sp = BASE_DIR / settings_path
+    if not sp.exists():
+        return {"parent_folders": []}
+    with open(sp) as f:
+        settings = json.load(f)
+    return {"parent_folders": settings.get("parent_folders", [])}
+
+
+@app.post("/api/settings/parent-folders")
+async def manage_parent_folders(req: BoundaryRequest):
+    """Add or remove a parent folder boundary."""
+    sp = Path(req.settings_path) if Path(req.settings_path).is_absolute() else BASE_DIR / req.settings_path
+    if not sp.exists():
+        settings: dict = {"parent_folders": []}
+    else:
+        with open(sp) as f:
+            settings = json.load(f)
+
+    if "parent_folders" not in settings:
+        settings["parent_folders"] = []
+
+    if req.action == "add" and req.path:
+        if req.path not in settings["parent_folders"]:
+            settings["parent_folders"].append(req.path)
+        with open(sp, "w") as f:
+            json.dump(settings, f, indent=2)
+        return {"parent_folders": settings["parent_folders"], "added": req.path}
+
+    elif req.action == "remove" and req.path:
+        settings["parent_folders"] = [p for p in settings["parent_folders"] if p != req.path]
+        with open(sp, "w") as f:
+            json.dump(settings, f, indent=2)
+        return {"parent_folders": settings["parent_folders"], "removed": req.path}
+
+    elif req.action == "list":
+        return {"parent_folders": settings.get("parent_folders", [])}
+
+    raise HTTPException(status_code=400, detail="Invalid action. Use: add | remove | list")
+
+
+@app.get("/api/rules")
+async def get_rules(rules_path: str = "rules.json"):
+    """Return current rules."""
+    rp = Path(rules_path) if Path(rules_path).is_absolute() else BASE_DIR / rules_path
+    rm = RuleManager(str(rp))
+    return {"rules": [r.to_dict() for r in rm.rules]}
+
+
+@app.post("/api/rules")
+async def save_rules(req: RulesRequest):
+    """Save rules."""
+    from planner.rules import Rule, FilterCondition
+    rules = []
+    for r in req.rules:
+        r = dict(r)
+        if r.get("filter"):
+            r["filter"] = FilterCondition(**r["filter"])
+        rules.append(Rule(**r))
+    rp = Path(req.rules_path) if Path(req.rules_path).is_absolute() else BASE_DIR / req.rules_path
+    rm = RuleManager(str(rp))
+    rm.rules = rules
+    rm.save()
+    return {"rules": [r.to_dict() for r in rm.rules]}
+
+
+# ---------------------------------------------------------------------------
 # API: Settings
 # ---------------------------------------------------------------------------
 
@@ -372,6 +540,60 @@ async def api_put_settings(body: dict):
     save_settings(body)
     return {"status": "ok"}
 
+
+# ---------------------------------------------------------------------------
+# Phase 3 extended endpoints
+# ---------------------------------------------------------------------------
+
+@app.post("/api/plan")
+async def create_plan(req: PlanRequest):
+    """Generate action plan from manifest + rules with boundary + unknown guards."""
+    try:
+        if req.rules is not None:
+            from planner.rules import Rule, FilterCondition
+            rules = []
+            for r in req.rules:
+                d = dict(r)
+                if d.get("filter"):
+                    d["filter"] = FilterCondition(**d["filter"])
+                rules.append(Rule(**d))
+        else:
+            rm = RuleManager()
+            rules = rm.rules
+        return plan_from_manifest(
+            manifest=req.manifest,
+            rules=rules,
+            default_output_dir=req.output_dir,
+            parent_folders=req.parent_folders or [],
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/settings/parent-folders")
+async def list_parent_folders():
+    settings = load_settings()
+    return {"parent_folders": settings.get("parent_folders", [])}
+
+
+@app.post("/api/settings/parent-folders")
+async def manage_parent_folders(req: BoundaryRequest):
+    settings = load_settings()
+    if "parent_folders" not in settings:
+        settings["parent_folders"] = []
+
+    if req.action == "add" and req.path:
+        if req.path not in settings["parent_folders"]:
+            settings["parent_folders"].append(req.path)
+        save_settings(settings)
+        return {"parent_folders": settings["parent_folders"], "added": req.path}
+    elif req.action == "remove" and req.path:
+        settings["parent_folders"] = [p for p in settings["parent_folders"] if p != req.path]
+        save_settings(settings)
+        return {"parent_folders": settings["parent_folders"], "removed": req.path}
+    elif req.action == "list":
+        return {"parent_folders": settings.get("parent_folders", [])}
+    raise HTTPException(status_code=400, detail="Invalid action. Use: add | remove | list")
 
 # ---------------------------------------------------------------------------
 # Static file serving (web UI)

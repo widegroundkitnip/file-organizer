@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 scans/
 hash_cache.db
+data/

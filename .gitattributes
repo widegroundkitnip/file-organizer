@@ -1,2 +1,1 @@
-data/drive_files.json filter=lfs diff=lfs merge=lfs -text
-data/drive_index.json filter=lfs diff=lfs merge=lfs -text
+# Keep large files out of git (use vault for reference data)
