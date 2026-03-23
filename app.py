@@ -106,6 +106,9 @@ class RulesUpdate(BaseModel):
 class PreviewRequest(BaseModel):
     manifest_path: str
     rules: list[dict]
+    scope_mode: Optional[str] = "preserve_parent_boundaries"
+    parent_folders: Optional[list[str]] = None
+    project_roots: Optional[list[dict]] = None
 
 
 class ExecuteRequest(BaseModel):
@@ -332,6 +335,9 @@ async def api_preview(req: PreviewRequest):
             manifest=manifest,
             rules=rules,
             default_output_dir=output_dir,
+            scope_mode=req.scope_mode,
+            parent_folders=req.parent_folders,
+            project_roots=req.project_roots,
         )
         # Canonical return: {actions, stats, plan_id}
         return result

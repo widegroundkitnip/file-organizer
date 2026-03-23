@@ -546,6 +546,7 @@ async function buildPreview() {
     const result = await api('POST', '/preview', {
       manifest_path: state.manifestPath,
       rules: state.rules,
+      scope_mode: document.querySelector('input[name="scope_mode"]:checked')?.value || 'preserve_parent_boundaries',
     });
     state.actionPlan = result.actions || [];
     renderPreview(result.stats);
@@ -1083,6 +1084,9 @@ function showResultNavItems() {
     if (nav) nav.style.display = '';
   });
 }
+
+// Stub — previously referenced but not defined; no-op
+function updateIntentScopeVisibility() {}
 
 function pollCrossPathProgress() {
   crosspathPollCount = 0;
@@ -1765,8 +1769,35 @@ function selectProfile(profileId) {
             : "rgba(255,255,255,0.04)";
     });
     updateIntentScopeVisibility();
+    // Sync scope_mode from profile
+    syncScopeModeFromProfile(profileId);
     // BUG-013/014: calling generateProfileRules on profile selection and showing results
     generateProfileRules(profileId);
+}
+
+async function syncScopeModeFromProfile(profileId) {
+    try {
+        var profiles = await api("GET", "/api/profiles");
+        var profile = profiles.find(function(p) { return p.id === profileId; });
+        if (!profile) return;
+        var allowed = profile.allowed_scope_modes || [];
+        var defaultSm = profile.default_scope_mode || "preserve_parent_boundaries";
+        // Hide scope mode options not allowed for this profile
+        document.querySelectorAll('input[name="scope_mode"]').forEach(function(radio) {
+            var label = radio.closest('label');
+            if (!label) return;
+            if (allowed.length === 0 || allowed.includes(radio.value)) {
+                label.style.display = '';
+            } else {
+                label.style.display = 'none';
+            }
+        });
+        // Check the default
+        var defaultRadio = document.querySelector('input[name="scope_mode"][value="' + defaultSm + '"]');
+        if (defaultRadio) defaultRadio.checked = true;
+    } catch(e) {
+        console.warn("syncScopeModeFromProfile failed", e);
+    }
 }
 
 async function generateProfileRules(profileId) {

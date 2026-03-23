@@ -148,6 +148,23 @@
           <div style="display:flex;gap:10px;flex-wrap:wrap" id="profile-selector"></div>
         </div>
 
+        <!-- Scope Mode -->
+        <div style="margin-bottom:16px">
+          <div style="color:var(--text);font-size:13px;font-weight:bold;margin-bottom:8px">Intent Scope</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap" id="scope-mode-selector">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);font-size:13px;color:var(--text)">
+              <input type="radio" name="scope_mode" value="global_organize" id="sm-global"> Global Organize
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);font-size:13px;color:var(--text)">
+              <input type="radio" name="scope_mode" value="preserve_parent_boundaries" id="sm-preserve" checked> Preserve Boundaries
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);font-size:13px;color:var(--text)">
+              <input type="radio" name="scope_mode" value="project_safe_mode" id="sm-project"> Project-Safe
+            </label>
+          </div>
+          <div class="text-sm text-muted" style="margin-top:6px">Global: move anywhere. Boundaries: don't cross parent folders. Project-Safe: don't move files out of detected projects.</div>
+        </div>
+
         <div class="btn-group">
           <button class="btn btn-primary" id="btn-scan" onclick="startScan()">🔍 Start Scan</button>
         </div>
