@@ -52,8 +52,12 @@ class ExtendedManifestBuilder:
         self.paths = [normalize_path(p) for p in paths]
         self.mode = mode
         self.include_hidden = include_hidden
-        self.exclude_dirs: Set[str] = set(exclude_dirs or [])
-        self.exclude_dirs.update({".git", "__pycache__", ".DS_Store", ".Trash", "$RECYCLE.BIN"})
+        # Default exclusions only apply when exclude_dirs is not explicitly provided (None).
+        # Passing [] means "override with nothing"; passing ["git"] overrides .git exclusion.
+        if exclude_dirs is None:
+            self.exclude_dirs: Set[str] = {".git", "__pycache__", ".venv", "env", "node_modules", ".DS_Store", ".Trash", "$RECYCLE.BIN"}
+        else:
+            self.exclude_dirs = set(exclude_dirs)
         self.hash_cache = hash_cache or {}  # path -> hash
         self.follow_symlinks = follow_symlinks
         self.files: List[ScannedFile] = []
@@ -71,12 +75,6 @@ class ExtendedManifestBuilder:
         return os.path.basename(path.rstrip("/")) or path
 
     def _should_exclude_dir(self, name: str) -> bool:
-        if is_venv_dir(name) and "venv" not in self.exclude_dirs:
-            return False  # user wants to include venvs
-        if is_git_dir(name) and "git" not in self.exclude_dirs:
-            return False
-        if is_pycache(name) and "pycache" not in self.exclude_dirs:
-            return False
         return name in self.exclude_dirs
 
     def _scan_single(self, root: str, parent_tree: str):
