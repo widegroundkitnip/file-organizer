@@ -562,7 +562,7 @@ async function buildPreview() {
     state.actionPlan = result.actions || [];
     renderPreview(result.stats);
     showAlert('preview-alert', 'success',
-      `Plan: ${result.stats.to_move} moves, ${result.stats.to_delete} deletes, ${result.stats.to_skip} skips`
+      `Plan: ${result.stats.moves} moves, ${result.stats.deletes} deletes, ${result.stats.skips} skips`
     );
   } catch(e) {
     showAlert('preview-alert', 'error', `Preview failed: ${e.message}`);
@@ -589,10 +589,10 @@ function renderPreview(stats) {
     unknown: { label: "⚠ Unknown", items: [], color: "#f59e0b" }
   };
   state.actionPlan.forEach(function(a) {
-    if (a.status === "skipped" || a.action === "skip") groups.skipped.items.push(a);
-    else if (a.blocked || a.status === "blocked") groups.blocked.items.push(a);
-    else if (a.is_duplicate) groups.duplicates.items.push(a);
-    else if (a.is_unknown) groups.unknown.items.push(a);
+    // Backend emits: classification, blocked, blocked_reason, action, status
+    if (a.action === "skip" || a.status === "skipped_no_rule") groups.skipped.items.push(a);
+    else if (a.blocked || a.status === "blocked_boundary" || a.status === "blocked") groups.blocked.items.push(a);
+    else if (a.action === "unknown_review" || a.classification === "unknown" || a.classification === "system") groups.unknown.items.push(a);
     else groups.organize.items.push(a);
   });
 
@@ -655,9 +655,9 @@ function renderPreview(stats) {
   var total = state.actionPlan.length;
   var statsHtml = stats ? '<div class="stats-grid mb-16">' +
     '<div class="stat-card"><div class="stat-value">' + stats.total + '</div><div class="stat-label">Total</div></div>' +
-    '<div class="stat-card"><div class="stat-value text-primary">' + stats.to_move + '</div><div class="stat-label">Move</div></div>' +
-    '<div class="stat-card"><div class="stat-value text-error">' + stats.to_delete + '</div><div class="stat-label">Delete</div></div>' +
-    '<div class="stat-card"><div class="stat-value text-muted">' + stats.to_skip + '</div><div class="stat-label">Skip</div></div>' +
+    '<div class="stat-card"><div class="stat-value text-primary">' + (stats.moves || 0) + '</div><div class="stat-label">Move</div></div>' +
+    '<div class="stat-card"><div class="stat-value text-error">' + (stats.deletes || 0) + '</div><div class="stat-label">Delete</div></div>' +
+    '<div class="stat-card"><div class="stat-value text-muted">' + (stats.skips || 0) + '</div><div class="stat-label">Skip</div></div>' +
     '</div>' : '';
 
   container.innerHTML = statsHtml + groupsHtml;
@@ -680,12 +680,11 @@ function toggleGroup(groupId) {
 
 function setPreviewFilter(f) {
   state.filter = f;
-  const stats = state.actionPlan.length ? {
-    total: state.actionPlan.length,
-    to_move: state.actionPlan.filter(a => a.action === 'move').length,
-    to_delete: state.actionPlan.filter(a => a.action === 'delete').length,
-    to_skip: state.actionPlan.filter(a => a.action === 'skip').length,
-  } : null;
+  const total = state.actionPlan.length;
+  const moves = state.actionPlan.filter(a => a.action === 'move').length;
+  const deletes = state.actionPlan.filter(a => a.action === 'delete').length;
+  const skips = state.actionPlan.filter(a => a.action === 'skip').length;
+  const stats = total ? { total, moves, deletes, skips } : null;
   renderPreview(stats);
 }
 
