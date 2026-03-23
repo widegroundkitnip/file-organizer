@@ -996,24 +996,55 @@ async function runCrossPathScan() {
     return;
   }
   try {
-    const data = await api("POST", "/scan/multi", { paths, mode: "basic", include_hidden: false, exclude_dirs: [] });
+    const data = await api("POST", "/scan/multi", { paths, mode: "deep", include_hidden: false, exclude_dirs: [] });
     window.lastCrossPathData = data;
-    const dupGroups = data.duplicates || [];
-    if (dupGroups.length === 0) {
+    const tier1 = data.tier1 || [];
+    const tier2 = data.tier2 || [];
+    const tier3 = data.tier3 || [];
+    const totalGroups = tier1.length + tier2.length + tier3.length;
+    if (totalGroups === 0) {
       resultsDiv.innerHTML = "<div class=\"alert alert-success\">No duplicates found across the selected folders.</div>";
     } else {
-      let html = "<div style=\"margin-bottom:16px;color:var(--text)\"><strong>" + dupGroups.length + "</strong> duplicate group(s) found</div>";
-      dupGroups.forEach(function(group, idx) {
-        html += "<div class=\"duplicate-group\" style=\"background:var(--surface);border:1px solid #333;border-radius:8px;padding:12px;margin-bottom:12px\">";
-        html += "<div style=\"color:var(--warning);margin-bottom:8px\">Group " + (idx+1) + " -- " + group.files.length + " files</div>";
-        group.files.forEach(function(f) {
-          html += "<div style=\"padding:4px 0;border-bottom:1px solid #222;font-size:13px;word-break:break-all\">";
-          html += "<span style=\"color:var(--text)\">" + escHtml(f.path) + "</span>";
-          html += " <span style=\"color:#666\">" + fmtSize(f.size) + "</span>";
+      let html = "<div style=\"margin-bottom:16px;color:var(--text)\"><strong>" + totalGroups + "</strong> duplicate group(s) found</div>";
+
+      if (tier1.length > 0) {
+        html += "<div style=\"margin-top:12px\"><strong style=\"color:var(--text)\">Exact (Tier 1): " + tier1.length + " groups</strong></div>";
+        tier1.forEach(function(group, idx) {
+          html += "<div class=\"duplicate-group\" style=\"background:var(--surface);border:1px solid #333;border-radius:8px;padding:12px;margin-top:8px\">";
+          html += "<div style=\"color:var(--warning);margin-bottom:8px\">Group " + (idx+1) + " -- " + group.files.length + " files</div>";
+          group.files.forEach(function(f) {
+            html += "<div style=\"padding:4px 0;border-bottom:1px solid #222;font-size:13px;word-break:break-all\">" + escHtml(f.path) + " <span style=\"color:#666\">" + fmtSize(f.size) + "</span></div>";
+          });
           html += "</div>";
         });
-        html += "</div>";
-      });
+      }
+
+      if (tier2.length > 0) {
+        html += "<div style=\"margin-top:24px\"><strong style=\"color:var(--text)\">Likely (Tier 2): " + tier2.length + " groups</strong></div>";
+        tier2.forEach(function(group, idx) {
+          html += "<div class=\"duplicate-group\" style=\"background:var(--surface);border:1px solid #333;border-radius:8px;padding:12px;margin-top:8px\">";
+          html += "<div style=\"color:var(--warning);margin-bottom:8px\">Group " + (idx+1) + " -- " + group.files.length + " files</div>";
+          group.files.forEach(function(f) {
+            html += "<div style=\"padding:4px 0;border-bottom:1px solid #222;font-size:13px;word-break:break-all\">" + escHtml(f.path) + " <span style=\"color:#666\">" + fmtSize(f.size) + "</span></div>";
+          });
+          html += "</div>";
+        });
+      }
+
+      // Tier 3 similar
+      if (data.tier3 && data.tier3.length > 0) {
+        html += "<div style=\"margin-top:24px\"><strong style=\"color:var(--text)\">Similar (Tier 3): " + data.tier3.length + " groups</strong></div>";
+        data.tier3.forEach(function(group, idx) {
+          var pct = Math.round(group.similarity * 100);
+          html += "<div class=\"duplicate-group\" style=\"background:var(--surface);border:1px solid #333;border-radius:8px;padding:12px;margin-top:8px\">";
+          html += "<div style=\"color:var(--info);margin-bottom:8px\">Group " + (idx+1) + " (" + pct + "% similar) -- " + group.files.length + " files</div>";
+          group.files.forEach(function(f) {
+            html += "<div style=\"padding:4px 0;border-bottom:1px solid #222;font-size:13px;word-break:break-all\">" + escHtml(f.path) + " <span style=\"color:#666\">" + fmtSize(f.size) + "</span></div>";
+          });
+          html += "</div>";
+        });
+      }
+
       resultsDiv.innerHTML = html;
     }
     const struct = data.structure || {};

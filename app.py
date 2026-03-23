@@ -33,6 +33,7 @@ from typing import List
 
 # Phase 3 extended modules
 from scanner import build_cross_manifest, CrossPathDuplicateFinder, StructureAnalyzer
+from scanner.duplicate import find_similar_duplicates
 from planner import plan_from_manifest, RuleManager
 
 # ---------------------------------------------------------------------------
@@ -414,6 +415,9 @@ async def scan_multi(req: MultiPathScanRequest):
     # Run duplicate detection
     finder = CrossPathDuplicateFinder(manifest["files"])
     dupes = finder.find()
+    tier1 = dupes.get("tier1", [])
+    tier2 = dupes.get("tier2", [])
+    tier3 = dupes.get("tier3") or find_similar_duplicates(manifest["files"])
 
     # Run structure analysis
     analyzer = StructureAnalyzer(manifest, req.paths)
@@ -424,7 +428,11 @@ async def scan_multi(req: MultiPathScanRequest):
 
     return {
         "manifest": manifest,
-        "duplicates": dupes,
+        "duplicates": tier1 + tier2 + tier3,
+        "tier1": tier1,
+        "tier2": tier2,
+        "tier3": tier3,
+        "total_groups": len(tier1) + len(tier2) + len(tier3),
         "structure": structure,
         "unknown_files": unknown_files[:100],
         "unknown_count": len(unknown_files),
