@@ -1099,13 +1099,30 @@ let crosspathInputCount = 1;
 
 function addPathInput() {
   const container = document.getElementById("crosspath-paths");
+  const idx = crosspathInputCount;
+  const row = document.createElement("div");
+  row.style = "display:flex;gap:8px;align-items:center;margin-bottom:8px";
   const input = document.createElement("input");
   input.type = "text";
   input.className = "path-input";
-  input.id = "crosspath-input-" + crosspathInputCount;
+  input.id = "crosspath-input-" + idx;
   input.placeholder = "/path/to/folder";
-  input.style = "width:100%;padding:10px;background:var(--surface);color:var(--text);border:1px solid #333;border-radius:8px;margin-bottom:8px";
-  container.appendChild(input);
+  input.style = "flex:1;padding:10px;background:var(--surface);color:var(--text);border:1px solid #333;border-radius:8px";
+  const fileInput = document.createElement("input");
+  fileInput.type = "file";
+  fileInput.id = "crosspath-browse-" + idx;
+  fileInput.setAttribute("webkitdirectory", "");
+  fileInput.style = "display:none";
+  fileInput.onchange = function() { handleBrowseFolder(this, 'crosspath-input-' + idx); };
+  const btn = document.createElement("button");
+  btn.className = "btn btn-secondary";
+  btn.style = "white-space:nowrap";
+  btn.textContent = "📁 Browse";
+  btn.onclick = function() { document.getElementById('crosspath-browse-' + idx).click(); };
+  row.appendChild(input);
+  row.appendChild(fileInput);
+  row.appendChild(btn);
+  container.appendChild(row);
   crosspathInputCount++;
 }
 
