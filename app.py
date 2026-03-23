@@ -99,7 +99,7 @@ class PreviewRequest(BaseModel):
 class ExecuteRequest(BaseModel):
     action_plan: list[dict]
     output_dir: str
-    dry_run: bool = False
+    dry_run: bool = True  # default SAFE — agent testing can't accidentally delete files
     on_conflict: str = "rename"
 
 
@@ -270,7 +270,12 @@ async def api_preview(req: PreviewRequest):
 
 @app.post("/api/execute")
 async def api_execute(req: ExecuteRequest):
-    """Execute action plan via executor.py."""
+    """Execute action plan via executor.py.
+    
+    SAFETY: dry_run defaults to True. Agents/testing: NEVER set dry_run=False.
+    """
+    if not req.dry_run:
+        logger.warning("[SECURITY] /api/execute called with dry_run=False — this will modify real files!")
     output_dir = os.path.expanduser(req.output_dir)
     os.makedirs(output_dir, exist_ok=True)
 

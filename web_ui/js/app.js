@@ -978,7 +978,7 @@ async function runCrossPathScan() {
     return;
   }
   try {
-    const data = await api("POST", "/scan/multi", { paths, mode: "deep", include_hidden: false, exclude_dirs: [] });
+    const data = await api("POST", "/api/scan/multi", { paths, mode: "deep", include_hidden: false, exclude_dirs: [] });
     window.lastCrossPathData = data;
     const tier1 = data.tier1 || [];
     const tier2 = data.tier2 || [];
