@@ -655,14 +655,29 @@ function renderPreview(stats) {
 
   // Stats bar (summary)
   var total = state.actionPlan.length;
-  var statsHtml = stats ? '<div class="stats-grid mb-16">' +
-    '<div class="stat-card"><div class="stat-value">' + stats.total + '</div><div class="stat-label">Total</div></div>' +
-    '<div class="stat-card"><div class="stat-value text-primary">' + (stats.moves || 0) + '</div><div class="stat-label">Move</div></div>' +
-    '<div class="stat-card"><div class="stat-value text-error">' + (stats.deletes || 0) + '</div><div class="stat-label">Delete</div></div>' +
-    '<div class="stat-card"><div class="stat-value text-muted">' + (stats.skips || 0) + '</div><div class="stat-label">Skip</div></div>' +
-    '</div>' : '';
+  // Simulation banner + file counts
+  var protectedCount = state.actionPlan.filter(function(a) {
+    return a.blocked || a.status === 'blocked_boundary' || a.status === 'blocked';
+  }).length;
+  var movesCount = stats ? (stats.moves || 0) : state.actionPlan.filter(function(a) { return a.action === 'move'; }).length;
+  var deletesCount = stats ? (stats.deletes || 0) : state.actionPlan.filter(function(a) { return a.action === 'delete'; }).length;
 
-  container.innerHTML = statsHtml + groupsHtml;
+  var simBanner = '<div style="background:#f59e0b15;border:1px solid #f59e0b40;border-radius:8px;padding:12px 16px;margin-bottom:14px">' +
+    '<div style="font-size:15px;font-weight:bold;color:#f59e0b;margin-bottom:6px">&#9888; This is a simulation &#8212; no files will be changed.</div>' +
+    '<div style="font-size:13px;color:var(--muted)">' +
+    '<span style="color:var(--accent);font-weight:600">' + movesCount + '</span> file' + (movesCount !== 1 ? 's' : '') + ' would be moved' +
+    (deletesCount > 0 ? ',&nbsp;&nbsp;<span style="color:var(--error);font-weight:600">' + deletesCount + '</span> file' + (deletesCount !== 1 ? 's' : '') + ' would be deleted' : '') +
+    (protectedCount > 0 ? ',&nbsp;&nbsp;<span style="color:#f59e0b;font-weight:600">' + protectedCount + '</span> file' + (protectedCount !== 1 ? 's' : '') + ' would be protected' : '') + '.' +
+    '</div></div>';
+
+  var statsHtml = '<div class="stats-grid mb-16">' +
+    '<div class="stat-card"><div class="stat-value">' + (stats ? stats.total : total) + '</div><div class="stat-label">Total</div></div>' +
+    '<div class="stat-card"><div class="stat-value text-primary">' + movesCount + '</div><div class="stat-label">Move</div></div>' +
+    '<div class="stat-card"><div class="stat-value text-error">' + deletesCount + '</div><div class="stat-label">Delete</div></div>' +
+    '<div class="stat-card"><div class="stat-value text-muted">' + (stats ? (stats.skips || 0) : state.actionPlan.filter(function(a){return a.action==='skip';}).length) + '</div><div class="stat-label">Skip</div></div>' +
+    '</div>';
+
+  container.innerHTML = simBanner + statsHtml + groupsHtml;
 
   // Collapsed by default for large groups
   ['blocked', 'unknown', 'skipped'].forEach(function(gKey) {
@@ -1488,6 +1503,68 @@ async function deleteMockData() {
 }
 
 // ── Rules — Collapsible Cards ─────────────────────────────────────────────────
+
+// Live rule status polling state
+var _ruleStatusInterval = null;
+var _ruleStatus = {}; // ruleIdx -> status string: 'idle'|'running'|'success'|'warning'|'error'
+
+function startRuleStatusPolling() {
+    if (_ruleStatusInterval) return;
+    _ruleStatusInterval = setInterval(pollRuleStatus, 2000);
+}
+
+function stopRuleStatusPolling() {
+    if (_ruleStatusInterval) {
+        clearInterval(_ruleStatusInterval);
+        _ruleStatusInterval = null;
+    }
+}
+
+async function pollRuleStatus() {
+    if (state.currentPage !== 'rules') {
+        stopRuleStatusPolling();
+        return;
+    }
+    try {
+        var data = await api('GET', '/api/rules/status');
+        var newStatus = {};
+        if (Array.isArray(data.statuses)) {
+            data.statuses.forEach(function(s) {
+                for (var i = 0; i < state.rules.length; i++) {
+                    if (state.rules[i].name === s.rule_name || state.rules[i].name === s.name) {
+                        newStatus[i] = s.status || 'idle';
+                        break;
+                    }
+                }
+            });
+        } else if (data.statuses && typeof data.statuses === 'object') {
+            Object.keys(data.statuses).forEach(function(key) {
+                for (var i = 0; i < state.rules.length; i++) {
+                    if (state.rules[i].name === key) {
+                        newStatus[i] = data.statuses[key] || 'idle';
+                        break;
+                    }
+                }
+            });
+        }
+        _ruleStatus = newStatus;
+        applyRuleStatusDots();
+    } catch(e) {
+        // Silently ignore polling failures
+    }
+}
+
+function applyRuleStatusDots() {
+    state.rules.forEach(function(rule, idx) {
+        var status = _ruleStatus[idx] || 'idle';
+        var dot = document.getElementById('rule-status-dot-' + idx);
+        if (dot) {
+            dot.className = 'rule-status-dot rule-status-' + status;
+            dot.title = status.charAt(0).toUpperCase() + status.slice(1);
+        }
+    });
+}
+
 function renderRules() {
     var container = document.getElementById('rules-list');
     if (!container) return;
@@ -1527,9 +1604,11 @@ function renderRules() {
 
         var arrowId = 'ra-' + idx;
         var detailsId = 'rd-' + idx;
+        var status = _ruleStatus[idx] || 'idle';
 
         return '<div class="rule-card" style="background:var(--surface);border:1px solid #333;border-radius:8px;padding:12px;margin-bottom:8px">' +
             '<div style="display:flex;align-items:center;gap:10px">' +
+            '<span class="rule-status-dot rule-status-' + escHtml(status) + '" id="rule-status-dot-' + idx + '" title="' + escHtml(status) + '"></span>' +
             '<div style="flex:1;font-weight:bold;color:var(--text)">' + escHtml(rule.name || 'Unnamed rule') + '</div>' +
             '<label class="switch" style="display:flex;align-items:center;gap:6px;cursor:pointer">' +
             '<input type="checkbox" ' + (enabled ? 'checked' : '') + ' onchange="toggleRule(' + idx + ', this.checked)">' +
@@ -1547,6 +1626,9 @@ function renderRules() {
     }).join('');
 
     container.innerHTML = html;
+
+    // Start polling when rules page is shown
+    startRuleStatusPolling();
 }
 
 function toggleRuleDetails(arrow, detailsId) {

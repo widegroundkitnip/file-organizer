@@ -301,6 +301,15 @@
         </div>
       </div>
 
+      <!-- Rules status legend -->
+      <div class="rules-legend" id="rules-legend">
+        <span><span class="rule-status-dot rule-status-idle"></span> Idle</span>
+        <span><span class="rule-status-dot rule-status-running"></span> Running</span>
+        <span><span class="rule-status-dot rule-status-success"></span> Success</span>
+        <span><span class="rule-status-dot rule-status-warning"></span> Warning</span>
+        <span><span class="rule-status-dot rule-status-error"></span> Error</span>
+      </div>
+
       <!-- Rules list -->
       <div id="rules-list"></div>
     </section>
@@ -358,7 +367,7 @@
         <div id="execute-content"></div>
 
         <div class="btn-group" style="margin-top:12px">
-          <button class="btn btn-accent" id="btn-execute" data-tooltip="Run the action plan. Make sure Dry Run is OFF and you have reviewed the Preview." onclick="executePlan()">⚡ Execute Plan</button>
+          <button class="btn btn-real-execute" id="btn-execute" data-tooltip="Run the action plan. Make sure Dry Run is OFF and you have reviewed the Preview." onclick="executePlan()">⚡ Run for real</button>
           <button class="btn btn-secondary" onclick="navigate('preview')">← Back to Preview</button>
         </div>
       </div>
