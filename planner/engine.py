@@ -159,22 +159,49 @@ def plan_from_manifest(
             # Rule matched — build a human-readable match reason
             rule_match_reason = _build_match_reason(rule.filter, file)
 
-            dst = apply_template(rule.destination_template, file, default_category)
-            if not dst.startswith("/"):
-                dst = os.path.join(default_output_dir, dst)
+            # Determine destination(s): multi-dest takes priority over single template
+            if rule.destinations:
+                dests = rule.destinations
+            elif rule.destination_template:
+                dests = [rule.destination_template]
+            else:
+                dests = []
 
-            actions.append(Action(
-                action=rule.action,
-                src=path,
-                dst=dst,
-                rule_matched=rule.name,
-                rule_id=rule.id,
-                rule_name=rule.name,
-                rule_match_reason=rule_match_reason,
-                status="pending",
-                conflict_mode=rule.conflict_mode,
-                classification="known",
-            ))
+            # Fan-out: generate one action per destination
+            for dest_tpl in dests:
+                dst = apply_template(dest_tpl, file, default_category)
+                if not dst.startswith("/"):
+                    dst = os.path.join(default_output_dir, dst)
+
+                actions.append(Action(
+                    action=rule.action,
+                    src=path,
+                    dst=dst,
+                    rule_matched=rule.name,
+                    rule_id=rule.id,
+                    rule_name=rule.name,
+                    rule_match_reason=rule_match_reason,
+                    status="pending",
+                    conflict_mode=rule.conflict_mode,
+                    classification="known",
+                ))
+
+            # If rule matched but has no destinations (e.g. skip/delete rules),
+            # still record the action so path is marked as handled
+            if not dests:
+                actions.append(Action(
+                    action=rule.action,
+                    src=path,
+                    dst="",
+                    rule_matched=rule.name,
+                    rule_id=rule.id,
+                    rule_name=rule.name,
+                    rule_match_reason=rule_match_reason,
+                    status="pending",
+                    conflict_mode=rule.conflict_mode,
+                    classification="known",
+                ))
+
             matched_paths.add(path)
             action_taken = True
             break

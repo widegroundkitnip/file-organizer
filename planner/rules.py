@@ -70,13 +70,18 @@ class Rule:
     enabled: bool = True
     priority: int = 0
     filter: Optional[FilterCondition] = None
+    # Single destination (backwards-compatible)
     destination_template: str = ""
+    # Multi-destination fan-out: list of destination templates
+    # When set (non-empty), rule generates one action PER destination
+    destinations: List[str] = field(default_factory=list)
     conflict_mode: str = "rename"  # rename | skip | overwrite
     action: str = "move"  # move | skip | delete
     tags: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "Rule":
@@ -86,6 +91,13 @@ class Rule:
             f = d["filter"]
             if isinstance(f, dict):
                 d["filter"] = cls._dict_to_filter(f)
+        # Normalise destinations: support both list and CSV-string (UI legacy)
+        if "destinations" in d:
+            val = d["destinations"]
+            if isinstance(val, str):
+                # Split on newlines or pipe
+                destinations = [x.strip() for x in re.split(r'[\n|]', val) if x.strip()]
+                d["destinations"] = destinations
         # Strip fields that are not part of the Rule dataclass (e.g. 'category' from UI forms)
         known = {f.name for f in fields(Rule)}
         for k in list(d.keys()):
