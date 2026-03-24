@@ -21,6 +21,11 @@ class Action:
     classification: str = "known"  # known | unknown | system
     blocked: bool = False
     blocked_reason: str = ""
+    # CORE-002: MD5 checksum verification
+    verify_checksum: bool = False  # request MD5 verification for this action
+    src_md5: str = ""             # computed before move: source file MD5
+    dst_md5: str = ""             # computed after move: destination file MD5
+    checksum_status: str = ""      # "" | "verified" | "mismatch" | "skipped" | "error"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -173,6 +178,9 @@ def plan_from_manifest(
                 if not dst.startswith("/"):
                     dst = os.path.join(default_output_dir, dst)
 
+                # CORE-002: MD5 checksum verification requested for move actions
+                verify_md5 = (rule.action == "move")
+
                 actions.append(Action(
                     action=rule.action,
                     src=path,
@@ -184,6 +192,7 @@ def plan_from_manifest(
                     status="pending",
                     conflict_mode=rule.conflict_mode,
                     classification="known",
+                    verify_checksum=verify_md5,
                 ))
 
             # If rule matched but has no destinations (e.g. skip/delete rules),
@@ -200,6 +209,7 @@ def plan_from_manifest(
                     status="pending",
                     conflict_mode=rule.conflict_mode,
                     classification="known",
+                    verify_checksum=False,  # no destination for MD5 to verify
                 ))
 
             matched_paths.add(path)
