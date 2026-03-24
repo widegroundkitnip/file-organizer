@@ -27,6 +27,7 @@ Safety guarantees:
 """
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -310,6 +311,22 @@ def cross_device_move(src: str, dst: str, trash_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# MD5 checksum helper (CORE-002)
+# ---------------------------------------------------------------------------
+
+def compute_md5(file_path: str, chunk_size: int = 65536) -> str:
+    """Compute MD5 hex digest of a file, reading in chunks to handle large files."""
+    md5 = hashlib.md5()
+    try:
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(chunk_size), b""):
+                md5.update(chunk)
+        return md5.hexdigest()
+    except OSError as e:
+        return f"error:{e}"
+
+
+# ---------------------------------------------------------------------------
 # Execute plan
 # ---------------------------------------------------------------------------
 
@@ -352,9 +369,18 @@ def execute_plan(
                     print(f"[OVERWRITE] WARNING: replacing {dst!r}")
                     # Will proceed; os.rename / shutil.move handles it
 
+            # CORE-002: MD5 checksum — compute before move if requested
+            verify_md5 = entry.get("verify_checksum", False)
+            src_md5 = ""
+            if verify_md5 and os.path.exists(src):
+                src_md5 = compute_md5(src)
+                print(f"[MD5:src] {src_md5}  {src!r}")
+
             if dry_run:
                 print(f"[DRY-RUN] move {src!r} → {dst!r}")
-                undo_log.update(idx, status="dry-run", actual_dst=dst)
+                undo_log.update(idx, status="dry-run", actual_dst=dst,
+                                src_md5=src_md5 if verify_md5 else None,
+                                checksum_status="skipped" if verify_md5 else "")
                 continue
 
             if not os.path.exists(src):
@@ -379,6 +405,8 @@ def execute_plan(
                 Path(dst_parent).mkdir(parents=True, exist_ok=True)
 
                 cross = is_cross_device(src, dst_parent)
+                checksum_status = ""
+                dst_md5 = ""
                 if cross:
                     cross_device_move(src, dst, trash_dir)
                     print(f"[OK:cross_device] move {src!r} → {dst!r}")
@@ -386,12 +414,35 @@ def execute_plan(
                         status="ok",
                         actual_dst=dst,
                         cross_device_move=True,
+                        src_md5=src_md5,
+                        checksum_status="skipped",  # cross-device: src was moved to trash, can't re-verify
                         note="src copied to dst; original moved to trash",
                     )
                 else:
                     shutil.move(src, dst)
                     print(f"[OK] move {src!r} → {dst!r}")
-                    undo_log.update(idx, status="ok", actual_dst=dst)
+
+                    # CORE-002: MD5 verification after move
+                    if verify_md5 and os.path.exists(dst):
+                        dst_md5 = compute_md5(dst)
+                        print(f"[MD5:dst] {dst_md5}  {dst!r}")
+                        if src_md5 and dst_md5 and src_md5 == dst_md5:
+                            checksum_status = "verified"
+                            print(f"[MD5:OK] checksums match — {src_md5}")
+                        elif dst_md5.startswith("error:"):
+                            checksum_status = "error"
+                            print(f"[MD5:ERROR] could not compute dst MD5: {dst_md5}")
+                        else:
+                            checksum_status = "mismatch"
+                            print(f"[MD5:WARN] checksum mismatch — src={src_md5} dst={dst_md5}")
+
+                    undo_log.update(idx,
+                        status="ok",
+                        actual_dst=dst,
+                        src_md5=src_md5 if verify_md5 else None,
+                        dst_md5=dst_md5 if verify_md5 else None,
+                        checksum_status=checksum_status if verify_md5 else "",
+                    )
 
             except Exception as e:
                 print(f"[ERROR] move failed: {e}")
