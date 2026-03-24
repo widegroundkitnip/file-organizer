@@ -179,6 +179,7 @@ async function loadScans() {
     state.scans = await api('GET', '/scans');
     renderScanHistory();
   } catch(e) {
+    // Scan history is a convenience feature — fail silently rather than alarm the user
     console.warn('Could not load scan history:', e.message);
   }
 }
@@ -388,6 +389,7 @@ async function loadRules() {
     const data = await api('GET', '/rules');
     state.rules = data.rules || [];
   } catch(e) {
+    // Silently skip — rules can always be created from scratch
     console.warn('Could not load rules:', e.message);
   }
 }
@@ -785,9 +787,25 @@ async function executePlan() {
       addFeedLine(line, cls);
     });
 
-    showAlert('execute-alert', 'success',
-      `Done: ${result.completed} completed, ${result.failed} failed.${result.undo_log ? ` Undo log: ${result.undo_log}` : ''}`
-    );
+    // UX-005: human-readable post-run summary
+    const moved = result.moved || result.completed || 0;
+    const deleted = result.deleted || 0;
+    const skipped = result.skipped || 0;
+    const protected_ = result.protected || 0;
+    const dryLabel = dryRun ? 'Dry run complete — no files were changed.' : '';
+    const summaryParts = [];
+    if (moved > 0)  summaryParts.push(`${moved} file${moved !== 1 ? 's' : ''} moved`);
+    if (deleted > 0) summaryParts.push(`${deleted} file${deleted !== 1 ? 's' : ''} deleted`);
+    if (skipped > 0) summaryParts.push(`${skipped} skipped`);
+    if (protected_ > 0) summaryParts.push(`${protected_} protected`);
+    const summary = summaryParts.length
+      ? summaryParts.join(', ') + '.'
+      : 'No files were changed.';
+    const undoNote = result.undo_log
+      ? `Your undo log is saved — you can restore if needed.`
+      : '';
+    const fullSummary = [dryLabel, summary, undoNote].filter(Boolean).join(' ');
+    showAlert('execute-alert', 'success', fullSummary);
   } catch(e) {
     addFeedLine(`ERROR: ${e.message}`, 'error');
     showAlert('execute-alert', 'error', `Execute failed: ${e.message}`);
@@ -1099,14 +1117,14 @@ function showResultNavItems() {
 function openFolder(path) {
   fetch('/api/open-folder?path=' + encodeURIComponent(path)).then(function(r) {
     if (!r.ok) {
-      var msg = 'Failed to open folder';
+      var msg = 'Could not open the folder. Try navigating to it manually in your file browser.';
       r.json().catch(function(){}).then(function(d) {
         if (d && d.detail) msg = d.detail;
         showAlert('scan-alert', 'error', msg);
       });
     }
   }).catch(function() {
-    showAlert('scan-alert', 'error', 'Could not open folder');
+    showAlert('scan-alert', 'error', 'Could not open folder — check that it exists and try again.');
   });
 }
 
