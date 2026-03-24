@@ -1853,6 +1853,21 @@ async function generateProfileRules(profileId) {
             showAlert("rules-alert", "info",
                 "Profile rules added (" + res.count + ") — <strong>disabled by default</strong>. Go to Rules to enable what you need before previewing."
             );
+            // Show prominent banner so the user can't miss this information
+            var banner = document.getElementById("profile-info-banner");
+            if (banner) {
+                banner.style.display = "block";
+                banner.style.background = "rgba(139,92,246,0.15)";
+                banner.style.border = "1px solid rgba(139,92,246,0.4)";
+                banner.style.color = "var(--accent)";
+                banner.innerHTML = "&#128275; <strong>" + res.count + " rules generated</strong> — all disabled by default. Go to <strong>Rules</strong> to enable what you need before previewing.";
+            }
+        } else {
+            // No rules generated — clear the banner
+            var banner = document.getElementById("profile-info-banner");
+            if (banner) {
+                banner.style.display = "none";
+            }
         }
     } catch(e) {
         console.error("generateProfileRules failed", e);
