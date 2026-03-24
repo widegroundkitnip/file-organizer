@@ -621,11 +621,20 @@ function renderPreview(stats) {
     return row;
   }
 
-  // Collapsible group sections
+  // Collapsible group sections — risky items first (blocked, unknown, skipped),
+  // then routine moves (organize, duplicates). A visual divider separates the two.
   var groupsHtml = '';
-  ['organize', 'duplicates', 'skipped', 'blocked', 'unknown'].forEach(function(gKey) {
+  var needsReviewOrder = ['blocked', 'unknown', 'skipped'];
+  var routineOrder = ['organize', 'duplicates'];
+
+  needsReviewOrder.concat(routineOrder).forEach(function(gKey, idx) {
     var g = groups[gKey];
     if (!g.items.length) return;
+    // Insert a visual divider between the two sections
+    if (idx === needsReviewOrder.length && routineOrder.some(function(rk) { return groups[rk].items.length > 0; })) {
+      groupsHtml += '<div style="border-top:2px solid rgba(255,255,255,0.1);margin:16px 0 12px;padding-top:12px">';
+      groupsHtml += '<div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">&#9654; Routine moves — these are safe and expected</div></div>';
+    }
     var groupId = 'group-' + gKey;
     var count = g.items.length;
     groupsHtml += '<div style="margin-bottom:12px">';
