@@ -435,6 +435,7 @@ function addRule() {
     subfolder,
     filter,
     destination_template: template,
+    destinations: [],   // CORE-001: multi-destination fan-out (use edit modal to set)
     conflict_mode: 'rename',
     enabled: true,
   };
@@ -1625,6 +1626,7 @@ function renderRules() {
             '<div style="font-size:12px;color:#aaa;margin-bottom:4px"><strong>Category:</strong> ' + escHtml(rule.category || 'Other') + '</div>' +
             '<div style="font-size:12px;color:#aaa;margin-bottom:4px"><strong>Action:</strong> ' + escHtml(rule.action || 'move') + '</div>' +
             (rule.destination_template ? '<div style="font-size:12px;color:#aaa;margin-bottom:4px"><strong>Template:</strong> <code style="color:#888">' + escHtml(rule.destination_template) + '</code></div>' : '') +
+            (rule.destinations && rule.destinations.length ? '<div style="font-size:12px;color:#aaa;margin-bottom:4px"><strong>Fan-out:</strong> <span style="background:#6366f140;color:#a5b4fc;border-radius:3px;padding:1px 5px">' + rule.destinations.length + ' dest' + (rule.destinations.length === 1 ? '' : 's') + '</span> — <span style="color:#6366f1">copies to ' + rule.destinations.length + ' location' + (rule.destinations.length === 1 ? '' : 's') + '</span></div>' : '') +
             (rule.tags && rule.tags.length ? '<div style="font-size:12px;color:#aaa;margin-bottom:6px"><strong>Tags:</strong> ' + rule.tags.map(function(t) { return '<span style="background:#333;border-radius:3px;padding:1px 4px;margin-right:3px">' + escHtml(t) + '</span>'; }).join('') + '</div>' : '') +
             '<button onclick="openEditModal(' + idx + ')" class="btn btn-secondary" style="margin-top:6px">✏ Edit</button>' +
             '</div></div>';
@@ -1665,6 +1667,12 @@ var _editRuleIdx = null;
 function openEditModal(idx) {
     _editRuleIdx = idx;
     var rule = state.rules[idx];
+
+    // Build destinations string from array (CORE-001: multi-destination fan-out)
+    var destinationsStr = '';
+    if (rule.destinations && rule.destinations.length) {
+        destinationsStr = rule.destinations.join('\n');
+    }
     if (!rule) return;
     var flt = rule.filter || {};
     var fltType = flt.type || 'extension';
@@ -1709,6 +1717,10 @@ function openEditModal(idx) {
 
         '<div class="form-group"><label style="color:var(--text);font-size:13px">Destination Template</label>' +
         '<input type="text" id="edit-rule-template" value="' + escHtml(rule.destination_template || '') + '" placeholder="{category}/{name}.{ext}" style="width:100%;padding:8px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--text);box-sizing:border-box"></div>' +
+
+        '<div class="form-group"><label style="color:var(--text);font-size:13px">Additional Destinations <span style="color:#666;font-weight:normal">(fan-out · one per line)</span></label>' +
+        '<textarea id="edit-rule-destinations" rows="3" placeholder="Backups/{name}.{ext}\nArchive/{year}/{month}/{name}.{ext}" style="width:100%;padding:8px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--text);box-sizing:border-box;font-family:monospace;font-size:12px;resize:vertical">' + escHtml(destinationsStr) + '</textarea>' +
+        '<div style="font-size:11px;color:#666;margin-top:2px">Separate multiple destinations with newlines. Leave empty for single destination.</div></div>' +
 
         '<div class="form-group"><label style="color:var(--text);font-size:13px">Tags (comma-separated)</label>' +
         '<input type="text" id="edit-rule-tags" value="' + escHtml((rule.tags || []).join(', ')) + '" style="width:100%;padding:8px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--text);box-sizing:border-box"></div>' +
@@ -1779,6 +1791,9 @@ function confirmEditRule() {
     rule.action = document.getElementById('edit-rule-action').value;
     rule.filter = filter;
     rule.destination_template = document.getElementById('edit-rule-template').value.trim();
+    // CORE-001: multi-destination fan-out — parse newline-separated destinations
+    var destLines = document.getElementById('edit-rule-destinations').value.split('\n');
+    rule.destinations = destLines.map(function(d) { return d.trim(); }).filter(Boolean);
     rule.conflict_mode = document.getElementById('edit-rule-conflict').value;
     var tagsVal = document.getElementById('edit-rule-tags').value.trim();
     rule.tags = tagsVal ? tagsVal.split(',').map(function(t) { return t.trim(); }).filter(Boolean) : [];
