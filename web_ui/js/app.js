@@ -821,11 +821,16 @@ async function executePlan() {
       : '';
     const fullSummary = [dryLabel, summary, undoNote].filter(Boolean).join(' ');
     showAlert('execute-alert', 'success', fullSummary);
+    // Show distinct dry-run result banner for simulation runs
+    var dryResultBanner = document.getElementById('dry-run-result-banner');
+    if (dryResultBanner) {
+      dryResultBanner.style.display = dryRun ? 'block' : 'none';
+    }
   } catch(e) {
     addFeedLine(`ERROR: ${e.message}`, 'error');
     showAlert('execute-alert', 'error', `Execute failed: ${e.message}`);
   } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = '⚡ Execute Plan'; }
+    if (btn) { btn.disabled = false; btn.innerHTML = '⚡ Run for real'; }
   }
 }
 
