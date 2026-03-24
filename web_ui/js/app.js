@@ -194,7 +194,7 @@ function renderScanHistory() {
   el.innerHTML = state.scans.slice(0, 8).map(s => `
     <div class="scan-history-item" onclick="loadScan('${escHtml(s.id)}')">
       <span style="font-size:18px">📁</span>
-      <span class="scan-history-path">${escHtml(s.path)}</span>
+      <span class="scan-history-path" onclick="event.stopPropagation();openFolder('${escHtml(s.path)}')" style="cursor:pointer" title="Open folder">${escHtml(s.path)}</span>
       <span class="scan-history-meta">
         ${s.total_files.toLocaleString()} files · ${fmtDate(s.timestamp).split(',')[0]}
       </span>
@@ -359,7 +359,7 @@ function renderResults() {
     <div class="card">
       <div class="card-title">Scan Info</div>
       <div class="flex gap-12" style="flex-wrap:wrap">
-        <div><span class="text-muted">Path: </span><span class="text-mono text-sm">${escHtml(meta.path || '')}</span></div>
+        <div><span class="text-muted">Path: </span><a href="#" onclick="openFolder(\'' + escHtml(meta.path || '') + '\');return false" style="color:inherit;text-decoration:none;cursor:pointer" title="Open scan folder"><span class="text-mono text-sm">${escHtml(meta.path || '')}</span></a></div>
         <div><span class="text-muted">Mode: </span>${escHtml(meta.mode || '')}</div>
         <div><span class="text-muted">Scanned: </span>${fmtDate(meta.timestamp)}</div>
         <div><span class="text-muted">Symlinks: </span>${meta.symlink_count || 0}</div>
@@ -608,9 +608,9 @@ function renderPreview(stats) {
       var reasonText = item.rule_match_reason ? '<span style="color:#6b7280;font-size:11px;margin-left:6px">via ' + escHtml(item.rule_match_reason) + '</span>' : '';
       row += '<div style="margin-bottom:4px"><span style="background:rgba(139,92,246,0.2);color:var(--accent);padding:2px 8px;border-radius:12px;font-size:11px;font-weight:bold">' + escHtml(item.rule_name) + '</span>' + reasonText + '</div>';
     }
-    row += '<div class="action-src">' + escHtml(item.src) + '</div>';
+    row += '<div class="action-src"><a href="#" onclick="openFolder(\'' + escHtml(item.src) + '\');return false" style="color:inherit;text-decoration:none;cursor:pointer" title="Open source folder">' + escHtml(item.src) + '</a></div>';
     if (item.dst && item.action !== 'skip') {
-      row += '<div class="action-arrow">↓</div><div class="action-dst">' + escHtml(item.dst) + '</div>';
+      row += '<div class="action-arrow">↓</div><div class="action-dst"><a href="#" onclick="openFolder(\'' + escHtml(item.dst) + '\');return false" style="color:inherit;text-decoration:none;cursor:pointer" title="Open destination folder">' + escHtml(item.dst) + '</a></div>';
     }
     if (item.rule_match_reason && !item.rule_name) {
       row += '<div style="color:#555;font-size:11px;margin-top:4px">' + escHtml(item.rule_match_reason) + '</div>';
@@ -1136,17 +1136,21 @@ function showResultNavItems() {
 }
 
 function openFolder(path) {
-  fetch('/api/open-folder?path=' + encodeURIComponent(path)).then(function(r) {
-    if (!r.ok) {
-      var msg = 'Could not open the folder. Try navigating to it manually in your file browser.';
-      r.json().catch(function(){}).then(function(d) {
-        if (d && d.detail) msg = d.detail;
-        showAlert('scan-alert', 'error', msg);
-      });
-    }
-  }).catch(function() {
-    showAlert('scan-alert', 'error', 'Could not open folder — check that it exists and try again.');
-  });
+  // Use POST /api/open-path for long paths (avoids URL length limits);
+  // fall back to GET for short paths.
+  if (path.length > 1500) {
+    fetch('/api/open-path', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({path: path})
+    }).catch(function() {
+      showAlert('scan-alert', 'error', 'Could not open folder — check that it exists and try again.');
+    });
+  } else {
+    fetch('/api/open-folder?path=' + encodeURIComponent(path)).catch(function() {
+      showAlert('scan-alert', 'error', 'Could not open folder — check that it exists and try again.');
+    });
+  }
 }
 
 function showCrosspathNavItems() {
@@ -1452,13 +1456,31 @@ function handleBrowseFolder(input, targetId) {
     if (!files || files.length === 0) return;
     var dir = files[0].webkitRelativePath.split('/')[0];
     var target = document.getElementById(targetId);
-    if (target) {
-        var fullPath = files[0].path || '';
-        if (fullPath) {
-            target.value = fullPath.substring(0, fullPath.indexOf(dir) + dir.length) || dir;
-        } else {
-            target.value = '/' + dir;
+    if (!target) return;
+    var fullPath = files[0].path || '';
+    var resolvedPath = '';
+    if (fullPath) {
+        resolvedPath = fullPath.substring(0, fullPath.indexOf(dir) + dir.length) || dir;
+    } else {
+        resolvedPath = '/' + dir;
+    }
+    if (target.tagName === 'INPUT') {
+        target.value = resolvedPath;
+        // Sync a companion display div if it exists (e.g. scan-path → scan-path-display)
+        var dispId = targetId + '-display';
+        var disp = document.getElementById(dispId);
+        if (disp) {
+            disp.textContent = resolvedPath;
+            disp.classList.remove('path-display-empty');
+            disp.style.color = 'var(--text)';
+            disp.onclick = null;
         }
+    } else {
+        // Div display — update text and mark as non-empty
+        target.textContent = resolvedPath;
+        target.classList.remove('path-display-empty');
+        target.style.color = 'var(--text)';
+        target.onclick = null; // no longer clickable once set (file picker is the control)
     }
     input.value = '';
 }

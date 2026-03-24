@@ -535,6 +535,7 @@ input[type="checkbox"] {
   font-size: 11px;
   color: var(--text);
   word-break: break-all;
+  cursor: pointer;
 }
 
 .action-arrow {
@@ -548,6 +549,7 @@ input[type="checkbox"] {
   font-size: 11px;
   color: var(--accent);
   word-break: break-all;
+  cursor: pointer;
 }
 
 .action-badge {

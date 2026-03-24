@@ -121,8 +121,10 @@
         <div class="form-group">
           <label>Folder Path</label>
           <div style="display:flex;gap:8px;align-items:center">
-            <input type="text" id="scan-path" placeholder="/path/to/folder" style="flex:1;font-family:monospace;padding:8px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--text)">
-            <button class="btn btn-secondary" onclick="browseForFolder('scan-path')" style="white-space:nowrap">📁 Browse</button>
+            <input type="file" id="scan-path-picker" webkitdirectory style="display:none" onchange="handleBrowseFolder(this, 'scan-path')">
+            <input type="hidden" id="scan-path" value="">
+            <div id="scan-path-display" onclick="document.getElementById('scan-path-picker').click()" style="flex:1;padding:8px 12px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--muted);font-family:monospace;font-size:13px;cursor:pointer;min-height:36px;display:flex;align-items:center;gap:8px" class="path-display-empty"><span>📁</span><span>/path/to/folder — click to browse</span></div>
+            <button class="btn btn-secondary" onclick="document.getElementById('scan-path-picker').click()" style="white-space:nowrap">📁 Browse</button>
           </div>
         </div>
 
@@ -350,7 +352,13 @@
         <div class="rule-grid">
           <div class="form-group">
             <label>Output Directory</label>
-            <input type="text" id="exec-output-dir" data-tooltip="Where moved files will go. A trash subfolder is created automatically." placeholder="/tmp/file-organizer-output" style="font-family:monospace">
+            <input type="file" id="exec-output-picker" webkitdirectory style="display:none" onchange="handleBrowseFolder(this, 'exec-output-dir')">
+            <div style="display:flex;gap:8px;align-items:center">
+              <div id="exec-output-dir-display" onclick="document.getElementById('exec-output-picker').click()" style="flex:1;padding:8px 12px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--text);font-family:monospace;font-size:13px;cursor:pointer;min-height:36px;display:flex;align-items:center;gap:8px"><span>📁</span><span>/tmp/file-organizer-output</span></div>
+              <button class="btn btn-secondary" onclick="document.getElementById('exec-output-picker').click()">📁 Browse</button>
+            </div>
+            <input type="hidden" id="exec-output-dir" value="/tmp/file-organizer-output">
+            <div class="text-sm text-muted" style="margin-top:4px">Click the path to change, or type a custom path in the hidden input above.</div>
           </div>
           <div class="form-group">
             <label>Conflict Mode</label>
@@ -460,8 +468,9 @@
       <div style="margin-top:16px">
         <label style="color:var(--text);font-size:13px;margin-bottom:6px;display:block">Where to create (full path):</label>
         <div style="display:flex;gap:8px">
-          <input type="text" id="mock-path" placeholder="/Users/sigge/test_workspace" style="flex:1;padding:10px;background:var(--surface);color:var(--text);border:1px solid #333;border-radius:8px">
-          <button class="btn btn-secondary" onclick="browseForFolder('mock-path')">📁 Browse</button>
+          <input type="file" id="mock-path-picker" webkitdirectory style="display:none" onchange="handleBrowseFolder(this, 'mock-path')">
+          <div id="mock-path-display" onclick="document.getElementById('mock-path-picker').click()" style="flex:1;padding:10px 12px;border-radius:8px;border:1px solid #333;background:var(--surface);color:var(--muted);font-family:monospace;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px" class="path-display-empty"><span>📁</span><span>/Users/sigge/test_workspace — click to browse</span></div>
+          <button class="btn btn-secondary" onclick="document.getElementById('mock-path-picker').click()">📁 Browse</button>
         </div>
       </div>
 

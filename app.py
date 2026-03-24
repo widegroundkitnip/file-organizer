@@ -899,6 +899,62 @@ async def api_open_folder(path: str):
 
     return {"ok": True, "folder": folder}
 
+
+@app.post("/api/open-path")
+async def api_open_path(body: dict):
+    """Open the containing folder of a given path in the OS file manager.
+
+    Accepts POST with JSON body {path: string}.
+    Mirrors GET /api/open-folder but uses POST body for long path safety.
+    """
+    path = body.get("path", "")
+    if not path:
+        raise HTTPException(400, detail="path is required")
+
+    file_path = os.path.expanduser(path)
+    abs_path = os.path.abspath(file_path)
+
+    if os.path.isdir(abs_path):
+        folder = abs_path
+    elif os.path.exists(abs_path) and (os.path.isfile(abs_path) or os.path.islink(abs_path)):
+        folder = os.path.dirname(abs_path)
+        if not folder:
+            folder = abs_path
+    else:
+        folder = os.path.dirname(abs_path)
+        if not folder:
+            folder = abs_path
+
+    folder = os.path.normpath(folder) or abs_path
+    system = platform.system()
+
+    try:
+        if system == "Darwin":
+            subprocess.run(["open", folder], check=True, capture_output=True)
+        elif system == "Windows":
+            subprocess.run(["explorer", folder], check=True, capture_output=True)
+        elif system == "Linux":
+            managers = ["xdg-open", "nautilus", "dolphin", "thunar", "pcmanfm", "nemo"]
+            opened = False
+            for mgr in managers:
+                try:
+                    subprocess.run([mgr, folder], check=True, capture_output=True)
+                    opened = True
+                    break
+                except (FileNotFoundError, subprocess.CalledProcessError):
+                    continue
+            if not opened:
+                subprocess.run(["xdg-open", folder], check=True, capture_output=True)
+        else:
+            raise HTTPException(400, detail=f"Unsupported OS: {system}")
+    except FileNotFoundError:
+        raise HTTPException(400, detail=f"No file manager found for path: {folder}")
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(500, detail=f"Failed to open folder: {e}")
+
+    return {"ok": True, "folder": folder}
+
+
 # ---------------------------------------------------------------------------
 # API: Project Detection
 # ---------------------------------------------------------------------------
