@@ -1012,10 +1012,11 @@ async def api_open_path(body: dict):
 
 @app.post("/api/detect-projects")
 async def api_detect_projects(req: dict):
-    from planner.project_detect import detect_project_roots
+    from scanner.project_detect import scan_for_project_roots
     paths = req.get("paths", [])
-    projects = detect_project_roots(paths)
-    return {"projects": projects}
+    include_hidden = req.get("include_hidden", False)
+    projects = scan_for_project_roots(paths, include_hidden=include_hidden)
+    return {"projects": [p.to_dict() for p in projects]}
 
 # ---------------------------------------------------------------------------
 # API: Run Configs (saved configurations)

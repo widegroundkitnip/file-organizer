@@ -355,17 +355,31 @@ function renderResults() {
     `;
   }
 
-  const metaHtml = `
-    <div class="card">
-      <div class="card-title">Scan Info</div>
-      <div class="flex gap-12" style="flex-wrap:wrap">
-        <div><span class="text-muted">Path: </span><a href="#" onclick="openFolder(\'' + escHtml(meta.path || '') + '\');return false" style="color:inherit;text-decoration:none;cursor:pointer" title="Open scan folder"><span class="text-mono text-sm">${escHtml(meta.path || '')}</span></a></div>
-        <div><span class="text-muted">Mode: </span>${escHtml(meta.mode || '')}</div>
-        <div><span class="text-muted">Scanned: </span>${fmtDate(meta.timestamp)}</div>
-        <div><span class="text-muted">Symlinks: </span>${meta.symlink_count || 0}</div>
-      </div>
-    </div>
-  `;
+  // Detected project roots (from project detection scan)
+  const projRoots = m.detected_project_roots || [];
+  const projStats = m.project_detection_stats || {};
+  let projHtml = '';
+  if (projRoots.length > 0) {
+    const badgeColor = { high: 'var(--success)', medium: 'var(--warning)', low: 'var(--muted)', informational: 'var(--muted)' };
+    projHtml = `
+      <div class="card" style="margin-top:12px">
+        <div class="card-title">🛡️ Detected Project Roots (${projRoots.length})</div>
+        <div style="margin-bottom:8px;font-size:12px;color:var(--muted)">
+          Confidence: ${Object.entries(projStats.by_confidence_label || {}).map(([k,v]) => `${v} ${k}`).join(', ')}
+          &nbsp;|&nbsp;Kinds: ${Object.entries(projStats.by_kind || {}).map(([k,v]) => `${v} ${k}`).join(', ')}
+        </div>
+        ${projRoots.map(p => {
+          const bc = badgeColor[p.confidence_label] || 'var(--muted)';
+          return `
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #222;flex-wrap:wrap">
+            <span style="font-size:11px;font-weight:bold;padding:2px 7px;border-radius:10px;background:${bc}22;color:${bc};border:1px solid ${bc}44">${p.confidence_label?.toUpperCase() || '?'}</span>
+            <span style="color:var(--text);flex:1;font-size:13px;word-break:break-all" title="${escHtml(p.why_detected || '')}">${escHtml(p.relative_path || p.path)}</span>
+            <span style="color:var(--muted);font-size:11px;white-space:nowrap">${p.markers ? p.markers.slice(0,4).join(', ') : ''}</span>
+            <button onclick="ignoreProjectDetection('${escHtml(p.path)}')" style="background:rgba(255,255,255,0.06);border:none;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;color:var(--muted)">Ignore</button>
+          </div>`;
+        }).join('')}
+      </div>`;
+  }
 
   document.getElementById('results-content').innerHTML =
     statsHtml + metaHtml +
@@ -552,6 +566,8 @@ async function buildPreview() {
       manifest_path: state.manifestPath,
       rules: state.rules,
       scope_mode: document.querySelector('input[name="scope_mode"]:checked')?.value || 'preserve_parent_boundaries',
+      parent_folders: settings.parent_folders || [],
+      project_roots: (state.manifest && state.manifest.detected_project_roots) || [],
     });
     state.actionPlan = result.actions || [];
     renderPreview(result.stats);
@@ -1366,6 +1382,24 @@ function tTN(el) {
 }
 
 // ── Unknown File Approve / Reject ──────────────────────────────────────────
+function ignoreProjectDetection(path) {
+  // Dismiss a detected project root from the current session list
+  // (stored in a session dismissed set; re-render results)
+  if (!window._ignoredProjectRoots) window._ignoredProjectRoots = new Set();
+  window._ignoredProjectRoots.add(path);
+  // Re-render results to hide the dismissed root
+  if (state.manifest) {
+    if (!state.manifest._origDetectedProjectRoots) {
+      state.manifest._origDetectedProjectRoots = state.manifest.detected_project_roots || [];
+    }
+    state.manifest.detected_project_roots = state.manifest._origDetectedProjectRoots.filter(
+      function(p) { return !window._ignoredProjectRoots.has(p.path); }
+    );
+    renderResults();
+  }
+  showAlert('preview-alert', 'success', 'Detection dismissed for this session');
+}
+
 function approveUnknown(path) {
   // Create a rule to move this file to Unknown/Approved
   var template = "Unknown/Approved/{name}.{ext}";

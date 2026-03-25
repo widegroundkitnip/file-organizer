@@ -9,6 +9,7 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import List, Dict, Optional, Set
 from .utils import classify_file, is_venv_dir, is_git_dir, is_pycache, get_relative_path, normalize_path
+from .project_detect import detect_projects_in_dir
 
 LARGE_FILE_THRESHOLD = 100 * 1024 * 1024  # 100 MB
 HASH_CACHE_SIZE = 8 * 1024  # xxhash chunk size for prefix hash (8KB)
@@ -71,6 +72,10 @@ class ExtendedManifestBuilder:
         # Current status for progress reporting
         self._current_path = ""
         self._phase = "idle"  # idle | walking | hashing | done | cancelled
+        # Project root detection (schema_version 1)
+        self.detected_project_roots: List[dict] = []
+        self._project_suppressed: Set[str] = set()
+        self._projects_lock = threading.Lock()
 
     def scan(self) -> dict:
         self._phase = "walking"
@@ -112,18 +117,55 @@ class ExtendedManifestBuilder:
 
     def _scan_single(self, root: str, parent_tree: str):
         root = normalize_path(root)
+        root_abs = os.path.abspath(root)
+        root_depth = root_abs.count(os.sep)
         dirs_checked = 0
         for dirpath, dirnames, filenames in os.walk(root, followlinks=self.follow_symlinks):
             # Check cancellation periodically (every ~50 directories)
             if dirs_checked % 50 == 0 and self.cancel_event.is_set():
                 return
             dirs_checked += 1
+
+            dirpath_abs = os.path.abspath(dirpath)
+
+            # --- Project detection (before we prune dirnames) ---
+            if dirpath_abs not in self._project_suppressed:
+                files_set = set(filenames)
+                dirs_set = set(dirnames)
+                pr = detect_projects_in_dir(dirpath_abs, files_set, dirs_set)
+                if pr is not None:
+                    rel = os.path.relpath(dirpath_abs, root_abs)
+                    depth = rel.count("/") + (1 if rel != "." else 0)
+                    with self._projects_lock:
+                        self.detected_project_roots.append({
+                            "path": pr.path,
+                            "relative_path": pr.relative_path,
+                            "tree": parent_tree,
+                            "kind": pr.kind,
+                            "confidence_score": pr.confidence_score,
+                            "confidence_label": pr.confidence_label,
+                            "markers": pr.markers,
+                            "strong_marker_count": pr.strong_marker_count,
+                            "medium_marker_count": pr.medium_marker_count,
+                            "weak_marker_count": pr.weak_marker_count,
+                            "nested_under": pr.nested_under,
+                            "depth": depth,
+                            "recommended_handling": pr.recommended_handling,
+                            "why_detected": pr.why_detected,
+                            "schema_version": 1,
+                        })
+                        # Suppress children of detected project
+                        self._project_suppressed.add(dirpath_abs)
+                    # Prune subdirs from walk to save traversal time
+                    dirnames[:] = []
+
             # Filter hidden dirs and excluded dirs in-place
             dirnames[:] = [
                 d for d in dirnames
                 if not (d.startswith(".") and not self.include_hidden)
                 and not self._should_exclude_dir(d)
             ]
+
             rel_dir = get_relative_path(dirpath, root)
             depth = rel_dir.count("/") + (1 if rel_dir else 0)
             for name in filenames:
@@ -212,6 +254,18 @@ class ExtendedManifestBuilder:
         return "other"
 
     def _build_manifest(self) -> dict:
+        # Build project root stats
+        proj_stats = {
+            "total_detected": len(self.detected_project_roots),
+            "by_confidence_label": {},
+            "by_kind": {},
+        }
+        for p in self.detected_project_roots:
+            label = p["confidence_label"]
+            kind = p["kind"]
+            proj_stats["by_confidence_label"][label] = proj_stats["by_confidence_label"].get(label, 0) + 1
+            proj_stats["by_kind"][kind] = proj_stats["by_kind"].get(kind, 0) + 1
+
         return {
             "schema_version": "2",
             "scan_meta": asdict(ScanMeta(
@@ -224,6 +278,8 @@ class ExtendedManifestBuilder:
                 scan_roots=[self._get_tree_name(p) for p in self.paths],
             )),
             "files": [asdict(f) for f in self.files],
+            "detected_project_roots": self.detected_project_roots,
+            "project_detection_stats": proj_stats,
             "stats": {
                 "total_files": self._file_count,
                 "total_size_bytes": self._total_size,
