@@ -41,6 +41,7 @@ from typing import List
 
 # Phase 3 extended modules
 from scanner import build_cross_manifest, CrossPathDuplicateFinder, StructureAnalyzer
+from scanner.manifest import ExtendedManifestBuilder
 from scanner.duplicate import find_similar_duplicates
 from planner import plan_from_manifest, RuleManager
 
@@ -70,6 +71,11 @@ _scan_progress_state = {
     "cancel_event": None,
 }
 _scan_progress_lock = threading.Lock()
+
+# In-memory manifest registry (populated by /api/scan after new-schema scans)
+# Key: manifest_id (str), Value: full manifest dict
+_manifest_registry: dict[str, dict] = {}
+_registry_lock = threading.Lock()
 
 # CORS — local dev, allow all
 app.add_middleware(
@@ -114,6 +120,7 @@ class ScanRequest(BaseModel):
     path: str
     mode: str = "fast"
     include_hidden: bool = False
+    exclude_dirs: Optional[list[str]] = None
 
 
 class RulesUpdate(BaseModel):
@@ -147,7 +154,10 @@ class SettingsUpdate(BaseModel):
 
 @app.post("/api/scan")
 async def api_scan(req: ScanRequest):
-    """Run organizer.py scan via subprocess."""
+    """Scan a directory using ManifestScanner (canonical scanner) directly.
+    
+    No subprocess, no disk artifact — fully in-process.
+    """
     global _scan_progress_state
 
     path = os.path.expanduser(req.path)
@@ -172,79 +182,95 @@ async def api_scan(req: ScanRequest):
         }
 
     timestamp_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d_%H%M%S")
-    manifest_filename = f"scan_{timestamp_str}.json"
-    manifest_path = str(SCANS_DIR / manifest_filename)
+    manifest_id = f"scan_{timestamp_str}"
 
-    cmd = [
-        sys.executable, str(BASE_DIR / "organizer.py"),
-        "--path", path,
-        "--mode", req.mode,
-        "--output-dir", str(SCANS_DIR),
-    ]
-    if req.include_hidden:
-        cmd.append("--include-hidden")
+    # Progress callback to update _scan_progress_state
+    def progress_callback(state: dict):
+        with _scan_progress_lock:
+            _scan_progress_state["phase"] = state.get("phase", "walking")
+            _scan_progress_state["current_path"] = state.get("current_path", path)
+            _scan_progress_state["files_found"] = state.get("files_found", 0)
 
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=300,
+        # Build manifest using canonical scanner (ExtendedManifestBuilder)
+        builder = ExtendedManifestBuilder(
+            paths=[path],
+            mode=req.mode,
+            include_hidden=req.include_hidden,
+            exclude_dirs=req.exclude_dirs,
+            progress_callback=progress_callback,
+            cancel_event=cancel_event,
         )
-    except subprocess.TimeoutExpired:
+
+        # Update progress state to "hashing" if deep mode
         with _scan_progress_lock:
-            _scan_progress_state["running"] = False
-            _scan_progress_state["phase"] = "done"
-            _scan_progress_state["error"] = "Scan timed out (300s)"
-        raise HTTPException(status_code=504, detail="Scan timed out (300s)")
+            _scan_progress_state["phase"] = "hashing" if req.mode == "deep" else "walking"
+
+        manifest = builder.scan()
+
+        if cancel_event.is_set():
+            with _scan_progress_lock:
+                _scan_progress_state["running"] = False
+                _scan_progress_state["phase"] = "cancelled"
+            raise HTTPException(status_code=499, detail="Scan cancelled")
+
+        # Add schema version to manifest
+        manifest["schema_version"] = "2"
+        manifest["manifest_id"] = manifest_id
+
+        # Run duplicate detection (Tier 1/2/3)
+        finder = CrossPathDuplicateFinder(manifest["files"])
+        dupes = finder.find()
+        tier1 = dupes.get("tier1", [])
+        tier2 = dupes.get("tier2", [])
+        tier3 = dupes.get("tier3") or []
+
+        # Run structure analysis
+        analyzer = StructureAnalyzer(manifest, [path])
+        structure = analyzer.analyze()
+
+        # Compute empty_folders and hidden_folders
+        from organizer import find_empty_folders, find_hidden_folders
+        empty_folders = find_empty_folders(path, req.include_hidden)
+        hidden_folders = find_hidden_folders(path)
+
+        # Unknown file summary
+        unknown_files = [
+            f for f in manifest["files"]
+            if f.get("classification") in ("unknown", "system")
+        ]
+
+        total_files = manifest.get("scan_meta", {}).get("total_files", 0)
+
+        # Store manifest in registry for /api/manifest/{id} compatibility
+        with _registry_lock:
+            _manifest_registry[manifest_id] = manifest
+
+        return {
+            "status": "ok",
+            "manifest_id": manifest_id,
+            "total_files": total_files,
+            "manifest": manifest,
+            "duplicates": tier1 + tier2 + tier3,
+            "tier1": tier1,
+            "tier2": tier2,
+            "tier3": tier3,
+            "structure": structure,
+            "empty_folders": empty_folders,
+            "hidden_folders": hidden_folders,
+            "unknown_files": unknown_files[:100],
+            "unknown_count": len(unknown_files),
+            "is_empty": len(manifest["files"]) == 0,
+        }
+
+    except HTTPException:
+        raise
     except Exception as e:
         with _scan_progress_lock:
             _scan_progress_state["running"] = False
             _scan_progress_state["phase"] = "done"
             _scan_progress_state["error"] = str(e)
         raise HTTPException(status_code=500, detail=f"Scan error: {e}")
-
-    if result.returncode != 0:
-        with _scan_progress_lock:
-            _scan_progress_state["running"] = False
-            _scan_progress_state["phase"] = "done"
-            _scan_progress_state["error"] = result.stderr or result.stdout
-        raise HTTPException(
-            status_code=500,
-            detail=f"Scan failed: {result.stderr or result.stdout}"
-        )
-
-    # Find the actual output file (organizer.py uses timestamp in filename)
-    scan_files = sorted(SCANS_DIR.glob("scan_*.json"))
-    if not scan_files:
-        with _scan_progress_lock:
-            _scan_progress_state["running"] = False
-            _scan_progress_state["phase"] = "done"
-            _scan_progress_state["error"] = "No manifest produced"
-        raise HTTPException(status_code=500, detail="Scan produced no manifest")
-    latest = scan_files[-1]
-
-    # Read total_files from manifest
-    try:
-        with open(latest, "r", encoding="utf-8") as f:
-            manifest = json.load(f)
-        total_files = manifest.get("scan_meta", {}).get("total_files", 0)
-    except Exception:
-        total_files = 0
-
-    with _scan_progress_lock:
-        _scan_progress_state["running"] = False
-        _scan_progress_state["phase"] = "done"
-        _scan_progress_state["total_files"] = total_files
-        _scan_progress_state["manifest_path"] = str(latest)
-        _scan_progress_state["manifest_id"] = latest.stem
-
-    return {
-        "status": "ok",
-        "manifest_path": str(latest),
-        "manifest_id": latest.stem,  # e.g. scan_2024-01-15_120000
-        "total_files": total_files,
-    }
 
 
 @app.get("/api/scan/status")
@@ -285,8 +311,15 @@ async def api_scan_cancel():
 
 @app.get("/api/manifest/{manifest_id}")
 async def api_get_manifest(manifest_id: str):
-    """Return manifest JSON for a given scan id."""
-    # manifest_id is the stem, e.g. scan_2024-01-15_120000
+    """Return manifest JSON for a given scan id.
+    
+    Checks in-memory registry first (new-schema scans), then falls back to disk.
+    """
+    # 1. Check in-memory registry (new-schema in-process scans)
+    with _registry_lock:
+        if manifest_id in _manifest_registry:
+            return _manifest_registry[manifest_id]
+    # 2. Fall back to disk (old organizer.py-produced scans)
     manifest_path = SCANS_DIR / f"{manifest_id}.json"
     if not manifest_path.exists():
         raise HTTPException(status_code=404, detail=f"Manifest not found: {manifest_id}")
@@ -296,8 +329,23 @@ async def api_get_manifest(manifest_id: str):
 
 @app.get("/api/scans")
 async def api_list_scans():
-    """List all scan manifests."""
+    """List all scan manifests (both in-memory and on-disk)."""
     scans = []
+    # 1. In-memory registry entries (new-schema in-process scans)
+    with _registry_lock:
+        for mid, manifest in _manifest_registry.items():
+            meta = manifest.get("scan_meta", {})
+            scans.append({
+                "id": mid,
+                "filename": None,
+                "path": meta.get("paths_scanned", [""])[0] if meta.get("paths_scanned") else "",
+                "mode": meta.get("mode", ""),
+                "timestamp": meta.get("timestamp", ""),
+                "total_files": meta.get("total_files", 0),
+                "total_size_bytes": meta.get("total_size_bytes", 0),
+                "in_memory": True,
+            })
+    # 2. Disk-based scans (old organizer.py-produced manifests)
     for p in sorted(SCANS_DIR.glob("scan_*.json"), reverse=True):
         try:
             with open(p, "r", encoding="utf-8") as f:
@@ -311,9 +359,12 @@ async def api_list_scans():
                 "timestamp": meta.get("timestamp", ""),
                 "total_files": meta.get("total_files", 0),
                 "total_size_bytes": meta.get("total_size_bytes", 0),
+                "in_memory": False,
             })
         except Exception:
             continue
+    # Sort by timestamp descending
+    scans.sort(key=lambda s: s.get("timestamp", ""), reverse=True)
     return scans
 
 

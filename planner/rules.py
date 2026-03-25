@@ -152,14 +152,25 @@ class RuleManager:
             self.rules = self._default_rules()
             self.save()
         self._deduplicate()
+        # BUG-001 fix: warn if all rules are disabled
+        if self.rules and all(not r.enabled for r in self.rules):
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                "[RULES] All rules are disabled! This gives new users zero automation. "
+                "Consider resetting rules to defaults."
+            )
 
     def _deduplicate(self):
-        """Remove duplicate rules (same name + filter.type), keeping highest-priority (lowest number)."""
-        # Build key: (name, filter_type)
+        """Remove duplicate rules (same name + filter.type), keeping highest-priority (lowest number).
+        
+        BUG-002 fix: case-insensitive name comparison to catch 'Screenshots' vs 'screenshots'.
+        """
+        # Build key: (name_lower, filter_type)
         seen: dict[tuple[str, str], tuple[int, Rule]] = {}
         for rule in self.rules:
             ftype = rule.filter.type if rule.filter else "none"
-            key = (rule.name, ftype)
+            key = (rule.name.lower(), ftype)
             if key not in seen or rule.priority < seen[key][0]:
                 seen[key] = (rule.priority, rule)
         # Sort by priority

@@ -2,6 +2,12 @@ import os
 from pathlib import Path
 from typing import Set
 
+# Directories always excluded from scanning (migrated from organizer.py)
+ALWAYS_EXCLUDED: Set[str] = {
+    ".git", ".svn", ".DS_Store", "__pycache__", ".Trash",
+    "$RECYCLE.BIN", "System Volume Information", "pagefile.sys", "Thumbs.db",
+}
+
 SYSTEM_EXTENSIONS: Set[str] = {
     ".pyc", ".pyo", ".DS_Store", ".localized",
     ".lock", ".tmp", ".temp", ".swp", ".swo",

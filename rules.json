@@ -90,39 +90,6 @@
       "tags": []
     },
     {
-      "id": "rule-screenshots",
-      "name": "Screenshots",
-      "enabled": false,
-      "priority": 10,
-      "filter": {
-        "type": "any_of",
-        "values": [
-          {
-            "type": "name_contains",
-            "values": [
-              "Screenshot"
-            ],
-            "value": null
-          },
-          {
-            "type": "name_contains",
-            "values": [
-              "Sk\u00e4rmbild"
-            ],
-            "value": null
-          }
-        ],
-        "value": null
-      },
-      "destination_template": "Images/Screenshots/{year}/{month}/{name}.{ext}",
-      "conflict_mode": "rename",
-      "action": "move",
-      "tags": [
-        "images",
-        "screenshots"
-      ]
-    },
-    {
       "id": "f4275192-1a89-4a27-b692-e95702ab1ded",
       "name": "Images",
       "enabled": false,
@@ -146,39 +113,6 @@
       "conflict_mode": "rename",
       "action": "move",
       "tags": []
-    },
-    {
-      "id": "rule-camera-photos",
-      "name": "Camera photos",
-      "enabled": false,
-      "priority": 11,
-      "filter": {
-        "type": "any_of",
-        "values": [
-          {
-            "type": "name_contains",
-            "values": [
-              "IMG_"
-            ],
-            "value": null
-          },
-          {
-            "type": "name_contains",
-            "values": [
-              "DSC_"
-            ],
-            "value": null
-          }
-        ],
-        "value": null
-      },
-      "destination_template": "Images/Camera/{year}/{month}/{name}.{ext}",
-      "conflict_mode": "rename",
-      "action": "move",
-      "tags": [
-        "images",
-        "camera"
-      ]
     },
     {
       "id": "rule-large-videos",

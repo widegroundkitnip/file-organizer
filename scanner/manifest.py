@@ -213,6 +213,7 @@ class ExtendedManifestBuilder:
 
     def _build_manifest(self) -> dict:
         return {
+            "schema_version": "2",
             "scan_meta": asdict(ScanMeta(
                 scan_id=datetime.now().strftime("%Y%m%d%H%M%S"),
                 paths_scanned=self.paths,
