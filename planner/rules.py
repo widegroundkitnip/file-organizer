@@ -76,7 +76,10 @@ class Rule:
     # When set (non-empty), rule generates one action PER destination
     destinations: List[str] = field(default_factory=list)
     conflict_mode: str = "rename"  # rename | skip | overwrite
-    action: str = "move"  # move | skip | delete
+    # ARCH-003: Rule action — planner action types (executor receives these)
+    # Valid: move | copy | delete | skip | merge
+    # NOTE: protected / blocked / unknown_review / conflict_review are STATUS values, NOT actions
+    action: str = "move"  # move | copy | delete | skip | merge
     tags: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:

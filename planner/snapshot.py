@@ -92,32 +92,36 @@ def verify_plan(snapshot_id: str, after_manifest: dict, plan: Optional[dict] = N
     blocked_ok = 0
     unexpected: list[dict] = []
 
+    # ARCH-001: planner uses action_type; snapshot may have old "action" key (backward compat)
     for action in actions:
-        act = action.get("action", "")
+        act = action.get("action_type") or action.get("action", "")
+        status = action.get("status", "")
         src = action.get("src") or action.get("path", "")
         dst = action.get("dst", "")
 
-        if act in ("skip", "blocked") or action.get("status") in ("skipped_no_rule", "blocked_boundary", "blocked"):
-            # Files that should remain unchanged
+        # Files that should remain unchanged (skip, or any status indicating blocked/no-action)
+        unchanged_statuses = {"skipped", "skipped_no_rule", "blocked", "protected",
+                             "unknown_review", "conflict_review"}
+        if act == "skip" or status in unchanged_statuses:
             if src in after_paths:
                 unchanged_ok += 1
+                if status == "blocked":
+                    blocked_ok += 1
             else:
-                # File missing when it should be unchanged — unexpected
                 unexpected.append({
                     "type": "should_exist",
                     "path": src,
                     "expected": "unchanged",
                     "found": "absent",
                     "action": act,
+                    "status": status,
                 })
         elif act == "move":
-            # For moves: source should be gone, destination should exist
             src_gone = src not in after_paths
             dst_exists = dst in after_paths
             if src_gone and dst_exists:
                 moved_ok += 1
             elif src_gone and not dst_exists:
-                # Moved but destination not found where expected
                 unexpected.append({
                     "type": "move_incomplete",
                     "src": src,
@@ -126,7 +130,6 @@ def verify_plan(snapshot_id: str, after_manifest: dict, plan: Optional[dict] = N
                     "found": "absent",
                 })
             elif not src_gone:
-                # Source still exists — move didn't happen
                 unexpected.append({
                     "type": "move_not_executed",
                     "src": src,
@@ -135,7 +138,6 @@ def verify_plan(snapshot_id: str, after_manifest: dict, plan: Optional[dict] = N
                     "found": "src still present",
                 })
         elif act == "delete":
-            # For deletes: source should be gone
             if src not in after_paths:
                 deleted_ok += 1
             else:

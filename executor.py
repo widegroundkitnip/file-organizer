@@ -48,19 +48,23 @@ def load_plan(plan_path: str) -> list:
     return plan
 
 
+# Executor action types — ARCH-001: only these 5 actions reach the executor
+# protected / blocked / unknown_review / conflict_review are planner statuses,
+# never action types and never reach the executor
+EXECUTOR_ACTION_TYPES = frozenset({"move", "copy", "delete", "skip", "merge"})
+
+
 def validate_plan(plan: list) -> None:
-    """Validate all paths are absolute and actions are known.
-    Note: unknown_review is handled as a no-op by the executor and does not reach here."""
-    valid_actions = {"move", "delete", "skip"}
+    """ARCH-001: Validate all paths are absolute and actions are known.
+    Note: protected / blocked / unknown_review / conflict_review are filtered
+    upstream and never reach the executor."""
     errors = []
 
     for i, entry in enumerate(plan):
         action = entry.get("action")
-        if action not in valid_actions:
-            # unknown_review was already filtered upstream but handle gracefully
-            if action == "unknown_review":
-                continue
-            errors.append(f"[{i}] Unknown action: {action!r}")
+        if action not in EXECUTOR_ACTION_TYPES:
+            errors.append(f"[{i}] Unknown executor action: {action!r} "
+                          "(allowed: {', '.join(sorted(EXECUTOR_ACTION_TYPES))})")
             continue
 
         if action == "move":
@@ -70,6 +74,20 @@ def validate_plan(plan: list) -> None:
                 errors.append(f"[{i}] move.src is not absolute: {src!r}")
             if not os.path.isabs(dst):
                 errors.append(f"[{i}] move.dst is not absolute: {dst!r}")
+        elif action == "copy":
+            src = entry.get("src", "")
+            dst = entry.get("dst", "")
+            if not os.path.isabs(src):
+                errors.append(f"[{i}] copy.src is not absolute: {src!r}")
+            if not os.path.isabs(dst):
+                errors.append(f"[{i}] copy.dst is not absolute: {dst!r}")
+        elif action == "merge":
+            src = entry.get("src", "")
+            dst = entry.get("dst", "")
+            if not os.path.isabs(src):
+                errors.append(f"[{i}] merge.src is not absolute: {src!r}")
+            if not os.path.isabs(dst):
+                errors.append(f"[{i}] merge.dst is not absolute: {dst!r}")
         elif action == "delete":
             path = entry.get("path", "")
             if not os.path.isabs(path):
@@ -142,6 +160,32 @@ class UndoLog:
                     "dst": entry["dst"],
                     "actual_dst": None,
                     "status": "pending",
+                    # EXEC-002: explicit error fields
+                    "error_type": "",
+                    "error_message": "",
+                    "warning_message": "",
+                })
+            elif action == "copy":
+                self._payload["actions"].append({
+                    "action": "copy",
+                    "src": entry["src"],
+                    "dst": entry["dst"],
+                    "actual_dst": None,
+                    "status": "pending",
+                    "error_type": "",
+                    "error_message": "",
+                    "warning_message": "",
+                })
+            elif action == "merge":
+                self._payload["actions"].append({
+                    "action": "merge",
+                    "src": entry["src"],
+                    "dst": entry["dst"],
+                    "actual_dst": None,
+                    "status": "pending",
+                    "error_type": "",
+                    "error_message": "",
+                    "warning_message": "",
                 })
             elif action == "delete":
                 self._payload["actions"].append({
@@ -149,19 +193,18 @@ class UndoLog:
                     "src": entry["path"],
                     "trash_path": None,
                     "status": "pending",
+                    "error_type": "",
+                    "error_message": "",
+                    "warning_message": "",
                 })
             elif action == "skip":
                 self._payload["actions"].append({
                     "action": "skip",
                     "path": entry.get("path", ""),
                     "status": "pending",
-                })
-            elif action == "unknown_review":
-                # Human-review items are no-ops in the executor
-                self._payload["actions"].append({
-                    "action": "unknown_review",
-                    "path": entry.get("src", entry.get("path", "")),
-                    "status": "pending",
+                    "error_type": "",
+                    "error_message": "",
+                    "warning_message": "",
                 })
         self._flush()
         print(f"[LOG] Pending undo log: {self._log_path}")
@@ -195,15 +238,15 @@ class UndoLog:
 
 def preflight_check(plan: list, trash_dir: Path, dry_run: bool) -> list[dict]:
     """
-    Validate all actions before touching anything.
-    Returns list of preflight_error dicts; empty = all good.
+    EXEC-002: Validate all actions before touching anything.
+    Returns list of preflight errors with explicit error_type; empty = all good.
     """
     errors: list[dict] = []
 
     for i, entry in enumerate(plan):
         action = entry["action"]
 
-        if action == "move":
+        if action in ("move", "copy", "merge"):
             src = entry["src"]
             dst = entry["dst"]
             dst_parent = str(Path(dst).parent)
@@ -212,18 +255,20 @@ def preflight_check(plan: list, trash_dir: Path, dry_run: bool) -> list[dict]:
             if not os.path.exists(src):
                 errors.append({
                     "index": i,
-                    "action": "move",
+                    "action": action,
                     "src": src,
-                    "error": "src does not exist",
+                    "error_type": "missing_source",
+                    "error_message": "src does not exist",
                     "status": "preflight_error",
                 })
                 continue
             if not os.access(src, os.R_OK):
                 errors.append({
                     "index": i,
-                    "action": "move",
+                    "action": action,
                     "src": src,
-                    "error": "no read permission on src",
+                    "error_type": "permissions",
+                    "error_message": "no read permission on src",
                     "status": "preflight_error",
                 })
 
@@ -232,12 +277,12 @@ def preflight_check(plan: list, trash_dir: Path, dry_run: bool) -> list[dict]:
                 if not os.access(dst_parent, os.W_OK):
                     errors.append({
                         "index": i,
-                        "action": "move",
+                        "action": action,
                         "dst_parent": dst_parent,
-                        "error": "no write permission on dst parent",
+                        "error_type": "permissions",
+                        "error_message": "no write permission on dst parent",
                         "status": "preflight_error",
                     })
-            # If dst_parent doesn't exist we'll create it — check its nearest ancestor
 
         elif action == "delete":
             path = entry["path"]
@@ -246,7 +291,8 @@ def preflight_check(plan: list, trash_dir: Path, dry_run: bool) -> list[dict]:
                     "index": i,
                     "action": "delete",
                     "src": path,
-                    "error": "src does not exist",
+                    "error_type": "missing_source",
+                    "error_message": "src does not exist",
                     "status": "preflight_error",
                 })
                 continue
@@ -255,7 +301,8 @@ def preflight_check(plan: list, trash_dir: Path, dry_run: bool) -> list[dict]:
                     "index": i,
                     "action": "delete",
                     "src": path,
-                    "error": "no read permission on src",
+                    "error_type": "permissions",
+                    "error_message": "no read permission on src",
                     "status": "preflight_error",
                 })
 
@@ -338,8 +385,15 @@ def execute_plan(
     undo_log: UndoLog,
 ) -> list:
     """
-    Execute the action plan. Undo log must already be initialized (PENDING).
+    ARCH-001: Execute the action plan.
+
+    Undo log must already be initialized (PENDING).
     Updates each entry as it completes.
+
+    Executor actions: move | copy | delete | skip | merge
+    NOTE: protected / blocked / unknown_review / conflict_review are
+    planner statuses — these never reach execute_plan() (filtered upstream).
+
     on_conflict: 'skip' | 'rename' | 'overwrite'
     """
     trash_dir = None if dry_run else make_trash_dir(output_dir)
@@ -358,7 +412,8 @@ def execute_plan(
                     print(f"[CONFLICT] move {src!r} → {dst!r} (dst exists, skipped)")
                     undo_log.update(idx,
                         status="conflict",
-                        reason="dst exists — skipped",
+                        error_type="conflict",
+                        error_message="dst exists — skipped by on-conflict=skip",
                         actual_dst=None,
                     )
                     continue
@@ -367,9 +422,7 @@ def execute_plan(
                     print(f"[RENAME] conflict resolved → {dst!r}")
                 elif on_conflict == "overwrite":
                     print(f"[OVERWRITE] WARNING: replacing {dst!r}")
-                    # Will proceed; os.rename / shutil.move handles it
 
-            # CORE-002: MD5 checksum — compute before move if requested
             verify_md5 = entry.get("verify_checksum", False)
             src_md5 = ""
             if verify_md5 and os.path.exists(src):
@@ -380,27 +433,36 @@ def execute_plan(
                 print(f"[DRY-RUN] move {src!r} → {dst!r}")
                 undo_log.update(idx, status="dry-run", actual_dst=dst,
                                 src_md5=src_md5 if verify_md5 else None,
-                                checksum_status="skipped" if verify_md5 else "")
+                                checksum_status="skipped" if verify_md5 else "",
+                                error_type="", error_message="", warning_message="")
                 continue
 
             if not os.path.exists(src):
                 print(f"[ERROR] move: src not found: {src!r}")
-                undo_log.update(idx, status="error", reason="src not found")
+                undo_log.update(idx,
+                    status="error",
+                    error_type="missing_source",
+                    error_message="src not found",
+                    actual_dst=None,
+                )
                 undo_log.finalize()
                 sys.exit(1)
 
             try:
-                # Disk space check before write
                 try:
                     import shutil as _shutil
                     total, used, free = _shutil.disk_usage(dst_parent)
                     src_size = os.path.getsize(src) if os.path.exists(src) else 0
-                    if free < src_size * 1.1:  # need 10% headroom
+                    if free < src_size * 1.1:
                         print(f"[ERROR] disk full on {dst_parent!r}: {free} bytes free, need ~{src_size}")
-                        undo_log.update(idx, status="error", reason="disk full")
-                        continue  # skip this file instead of crashing
+                        undo_log.update(idx,
+                            status="error",
+                            error_type="disk_full",
+                            error_message=f"disk full on {dst_parent}: {free} bytes free, need ~{src_size}",
+                        )
+                        continue
                 except Exception:
-                    pass  # don't let space check failures block the move
+                    pass
 
                 Path(dst_parent).mkdir(parents=True, exist_ok=True)
 
@@ -415,14 +477,14 @@ def execute_plan(
                         actual_dst=dst,
                         cross_device_move=True,
                         src_md5=src_md5,
-                        checksum_status="skipped",  # cross-device: src was moved to trash, can't re-verify
-                        note="src copied to dst; original moved to trash",
+                        checksum_status="skipped",
+                        error_type="", error_message="",
+                        warning_message="cross-device: original moved to trash",
                     )
                 else:
                     shutil.move(src, dst)
                     print(f"[OK] move {src!r} → {dst!r}")
 
-                    # CORE-002: MD5 verification after move
                     if verify_md5 and os.path.exists(dst):
                         dst_md5 = compute_md5(dst)
                         print(f"[MD5:dst] {dst_md5}  {dst!r}")
@@ -442,11 +504,146 @@ def execute_plan(
                         src_md5=src_md5 if verify_md5 else None,
                         dst_md5=dst_md5 if verify_md5 else None,
                         checksum_status=checksum_status if verify_md5 else "",
+                        error_type="checksum_mismatch" if checksum_status == "mismatch" else "",
+                        error_message=f"MD5 mismatch: src={src_md5} dst={dst_md5}" if checksum_status == "mismatch" else "",
                     )
 
+            except OSError as e:
+                err_type = "permissions" if e.errno in (1, 13, 21) else "error"
+                print(f"[ERROR] move failed: {e}")
+                undo_log.update(idx,
+                    status="error",
+                    error_type=err_type,
+                    error_message=str(e),
+                )
+                undo_log.finalize()
+                sys.exit(1)
             except Exception as e:
                 print(f"[ERROR] move failed: {e}")
-                undo_log.update(idx, status="error", reason=str(e))
+                undo_log.update(idx,
+                    status="error",
+                    error_type="error",
+                    error_message=str(e),
+                )
+                undo_log.finalize()
+                sys.exit(1)
+
+        elif action == "copy":
+            # ARCH-001: copy is a first-class executor action
+            src = entry["src"]
+            dst = entry["dst"]
+            dst_parent = str(Path(dst).parent)
+
+            if dry_run:
+                print(f"[DRY-RUN] copy {src!r} → {dst!r}")
+                undo_log.update(idx, status="dry-run", actual_dst=dst,
+                                error_type="", error_message="", warning_message="")
+                continue
+
+            if not os.path.exists(src):
+                print(f"[ERROR] copy: src not found: {src!r}")
+                undo_log.update(idx,
+                    status="error",
+                    error_type="missing_source",
+                    error_message="src not found",
+                )
+                undo_log.finalize()
+                sys.exit(1)
+
+            try:
+                Path(dst_parent).mkdir(parents=True, exist_ok=True)
+                if os.path.exists(dst):
+                    if on_conflict == "skip":
+                        print(f"[CONFLICT] copy {src!r} → {dst!r} (dst exists, skipped)")
+                        undo_log.update(idx,
+                            status="conflict",
+                            error_type="conflict",
+                            error_message="dst exists — skipped",
+                            actual_dst=None,
+                        )
+                        continue
+                    elif on_conflict == "rename":
+                        dst = resolve_rename(dst)
+                        print(f"[RENAME] conflict resolved → {dst!r}")
+
+                shutil.copy2(src, dst)
+                print(f"[OK] copy {src!r} → {dst!r}")
+                undo_log.update(idx,
+                    status="ok",
+                    actual_dst=dst,
+                    error_type="", error_message="",
+                )
+            except OSError as e:
+                err_type = "permissions" if e.errno in (1, 13, 21) else "error"
+                print(f"[ERROR] copy failed: {e}")
+                undo_log.update(idx,
+                    status="error",
+                    error_type=err_type,
+                    error_message=str(e),
+                )
+                undo_log.finalize()
+                sys.exit(1)
+            except Exception as e:
+                print(f"[ERROR] copy failed: {e}")
+                undo_log.update(idx,
+                    status="error",
+                    error_type="error",
+                    error_message=str(e),
+                )
+                undo_log.finalize()
+                sys.exit(1)
+
+        elif action == "merge":
+            # ARCH-001: merge — concatenate src into dst (append-style)
+            # For now implemented as: copy src to dst.parent/dst.name.src_ext, then delete src
+            src = entry["src"]
+            dst = entry["dst"]
+
+            if dry_run:
+                print(f"[DRY-RUN] merge {src!r} → {dst!r}")
+                undo_log.update(idx, status="dry-run",
+                                error_type="", error_message="", warning_message="")
+                continue
+
+            if not os.path.exists(src):
+                print(f"[ERROR] merge: src not found: {src!r}")
+                undo_log.update(idx,
+                    status="error",
+                    error_type="missing_source",
+                    error_message="src not found",
+                )
+                undo_log.finalize()
+                sys.exit(1)
+
+            try:
+                dst_parent = str(Path(dst).parent)
+                Path(dst_parent).mkdir(parents=True, exist_ok=True)
+                # Append src content to dst
+                with open(src, "rb") as sf, open(dst, "ab") as df:
+                    shutil.copyfileobj(sf, df)
+                print(f"[OK] merge {src!r} → {dst!r}")
+                undo_log.update(idx,
+                    status="ok",
+                    actual_dst=dst,
+                    error_type="", error_message="",
+                )
+            except OSError as e:
+                err_type = "permissions" if e.errno in (1, 13, 21) else "error"
+                print(f"[ERROR] merge failed: {e}")
+                undo_log.update(idx,
+                    status="error",
+                    error_type=err_type,
+                    error_message=str(e),
+                )
+                undo_log.finalize()
+                sys.exit(1)
+            except Exception as e:
+                print(f"[ERROR] merge failed: {e}")
+                undo_log.update(idx,
+                    status="error",
+                    error_type="error",
+                    error_message=str(e),
+                )
                 undo_log.finalize()
                 sys.exit(1)
 
@@ -456,12 +653,17 @@ def execute_plan(
 
             if dry_run:
                 print(f"[DRY-RUN] delete {path!r} → trash")
-                undo_log.update(idx, status="dry-run", trash_path="<dry-run>")
+                undo_log.update(idx, status="dry-run", trash_path="<dry-run>",
+                                error_type="", error_message="", warning_message="")
                 continue
 
             if not os.path.exists(path):
                 print(f"[ERROR] delete: src not found: {path!r}")
-                undo_log.update(idx, status="error", reason="src not found")
+                undo_log.update(idx,
+                    status="error",
+                    error_type="missing_source",
+                    error_message="src not found",
+                )
                 undo_log.finalize()
                 sys.exit(1)
 
@@ -473,17 +675,28 @@ def execute_plan(
             try:
                 shutil.move(path, trash_path)
                 print(f"[OK] delete {path!r} → {trash_path!r}")
-                undo_log.update(idx, status="ok", trash_path=trash_path)
+                undo_log.update(idx,
+                    status="ok",
+                    trash_path=trash_path,
+                    error_type="", error_message="",
+                )
             except Exception as e:
                 print(f"[ERROR] delete failed: {e}")
-                undo_log.update(idx, status="error", reason=str(e))
+                undo_log.update(idx,
+                    status="error",
+                    error_type="error",
+                    error_message=str(e),
+                )
                 undo_log.finalize()
                 sys.exit(1)
 
         elif action == "skip":
             path = entry.get("path", "")
             print(f"[SKIP] {path!r}")
-            undo_log.update(idx, status="skipped")
+            undo_log.update(idx,
+                status="skipped",
+                error_type="", error_message="", warning_message="",
+            )
 
     return undo_log.records
 

@@ -519,25 +519,46 @@ async def api_execute(req: ExecuteRequest):
         json.dump(req.action_plan, tmp, indent=2)
         plan_path = tmp.name
 
-    # Filter out unknown_review — these require human review and must never reach executor
-    executable_plan = [item for item in req.action_plan if item.get("action") != "unknown_review"]
+    # ARCH-001: Filter planner-only statuses — these NEVER reach the executor.
+    # protected / blocked / unknown_review / conflict_review are PLANNING outcomes.
+    planner_statuses = {"protected", "blocked", "unknown_review", "conflict_review"}
+    executable_plan = [
+        item for item in req.action_plan
+        if item.get("status") not in planner_statuses
+        and item.get("action") not in planner_statuses
+    ]
 
-    # Map action plan items to executor's expected format:
-    # executor expects "delete" items to have "path" key, not "src"
+    # Normalize plan to executor field names:
+    # planner returns: action_type, src, dst, plan_id, ...
+    # executor expects: action (not action_type), path (for delete/skip), src/dst (for move/copy/merge)
     normalized_plan = []
     for item in executable_plan:
-        if item["action"] == "delete":
+        action = item.get("action_type") or item.get("action", "skip")
+
+        if action == "delete":
             normalized_plan.append({
                 "action": "delete",
                 "path": item.get("src", item.get("path", "")),
+                "plan_id": item.get("plan_id", ""),
             })
-        elif item["action"] == "skip":
+        elif action == "skip":
             normalized_plan.append({
                 "action": "skip",
                 "path": item.get("src", item.get("path", "")),
+                "plan_id": item.get("plan_id", ""),
+            })
+        elif action in ("move", "copy", "merge"):
+            normalized_plan.append({
+                "action": action,
+                "src": item.get("src", ""),
+                "dst": item.get("dst", ""),
+                "plan_id": item.get("plan_id", ""),
+                "verify_checksum": item.get("verify_checksum", False),
+                "conflict_mode": item.get("conflict_mode", "rename"),
             })
         else:
-            normalized_plan.append(item)
+            # Unknown action — skip it (shouldn't happen after status filter)
+            continue
 
     with open(plan_path, "w", encoding="utf-8") as f:
         json.dump(normalized_plan, f, indent=2)
