@@ -230,7 +230,7 @@ async def api_scan(req: ScanRequest):
         structure = analyzer.analyze()
 
         # Compute empty_folders and hidden_folders
-        from organizer import find_empty_folders, find_hidden_folders
+        from scanner.utils import find_empty_folders, find_hidden_folders
         empty_folders = find_empty_folders(path, req.include_hidden)
         hidden_folders = find_hidden_folders(path)
 
