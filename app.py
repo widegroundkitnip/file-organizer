@@ -220,21 +220,14 @@ class DuplicateConsolidateResponse(BaseModel):
 
 @app.post("/api/scan")
 async def api_scan(req: ScanRequest):
-    """Scan a directory using ManifestScanner (canonical scanner) directly.
-
-    Runs in-process and returns both a durable scan id and a concrete manifest file path.
-    """
-    global _scan_progress_state
-
+    """Run scan via subprocess (organizer.py). Writes manifest to disk."""
     path = os.path.expanduser(req.path)
     if not os.path.isdir(path):
         raise HTTPException(status_code=400, detail=f"Not a directory: {path}")
 
-    # Check if a scan is already running
+    # Reset scan state
+    global _scan_progress_state
     with _scan_progress_lock:
-        if _scan_progress_state["running"]:
-            raise HTTPException(status_code=409, detail="A scan is already in progress")
-        cancel_event = threading.Event()
         _scan_progress_state = {
             "running": True,
             "phase": "walking",
@@ -244,130 +237,94 @@ async def api_scan(req: ScanRequest):
             "manifest_id": None,
             "total_files": 0,
             "error": None,
-            "cancel_event": cancel_event,
+            "cancel_event": threading.Event(),
         }
 
     timestamp_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d_%H%M%S")
-    manifest_id = f"scan_{timestamp_str}"
+    manifest_filename = f"scan_{timestamp_str}.json"
+    manifest_path_str = str(SCANS_DIR / manifest_filename)
 
-    # Progress callback to update _scan_progress_state
-    def progress_callback(state: dict):
-        with _scan_progress_lock:
-            _scan_progress_state["phase"] = state.get("phase", "walking")
-            _scan_progress_state["current_path"] = state.get("current_path", path)
-            _scan_progress_state["files_found"] = state.get("files_found", 0)
+    cmd = [
+        sys.executable, str(BASE_DIR / "organizer.py"),
+        "--path", path,
+        "--mode", req.mode,
+        "--output-dir", str(SCANS_DIR),
+    ]
+    if req.include_hidden:
+        cmd.append("--include-hidden")
 
     try:
-        # Build manifest using canonical scanner (ExtendedManifestBuilder)
-        builder = ExtendedManifestBuilder(
-            paths=[path],
-            mode=req.mode,
-            include_hidden=req.include_hidden,
-            exclude_dirs=req.exclude_dirs,
-            progress_callback=progress_callback,
-            cancel_event=cancel_event,
+        result = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         )
-
-        def run_scan() -> dict[str, Any]:
-            manifest = builder.scan()
-
-            if cancel_event.is_set():
-                return {"cancelled": True}
-
-            manifest["schema_version"] = "2"
-            manifest["manifest_id"] = manifest_id
-
-            finder = CrossPathDuplicateFinder(manifest["files"])
-            dupes = finder.find()
-            tier1 = dupes.get("tier1", [])
-            tier2 = dupes.get("tier2", [])
-            tier3 = dupes.get("tier3") or []
-            manifest["tier1"] = tier1
-            manifest["tier2"] = tier2
-            manifest["tier3"] = tier3
-
-            analyzer = StructureAnalyzer(manifest, [path])
-            structure = analyzer.analyze()
-
-            from scanner.utils import find_empty_folders, find_hidden_folders
-            empty_folders = find_empty_folders(path, req.include_hidden)
-            hidden_folders = find_hidden_folders(path)
-
-            unknown_files = [
-                f for f in manifest["files"]
-                if f.get("classification") in ("unknown", "system")
-            ]
-
-            total_files = manifest.get("scan_meta", {}).get("total_files", 0)
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                suffix=".json",
-                delete=False,
-                prefix="fo_manifest_",
-                encoding="utf-8",
-            ) as f:
-                json.dump(manifest, f)
-                temp_manifest_path = f.name
-
-            manifest_path = SCANS_DIR / f"{manifest_id}.json"
-            with open(manifest_path, "w", encoding="utf-8") as f:
-                json.dump(manifest, f, indent=2, ensure_ascii=False)
-
-            with _registry_lock:
-                _manifest_registry[manifest_id] = manifest
-
-            return {
-                "status": "ok",
-                "manifest_path": temp_manifest_path,
-                "manifest_id": manifest_id,
-                "total_files": total_files,
-                "manifest": manifest,
-                "duplicates": tier1 + tier2 + tier3,
-                "tier1": tier1,
-                "tier2": tier2,
-                "tier3": tier3,
-                "structure": structure,
-                "empty_folders": empty_folders,
-                "hidden_folders": hidden_folders,
-                "unknown_files": unknown_files[:100],
-                "unknown_count": len(unknown_files),
-                "is_empty": len(manifest["files"]) == 0,
-            }
-
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(_scan_executor, run_scan)
-
-        if cancel_event.is_set() or result.get("cancelled"):
-            with _scan_progress_lock:
-                _scan_progress_state["running"] = False
-                _scan_progress_state["phase"] = "cancelled"
-                _scan_progress_state["manifest_path"] = None
-                _scan_progress_state["manifest_id"] = None
-                _scan_progress_state["total_files"] = 0
-                _scan_progress_state["error"] = "Scan cancelled"
-                _scan_progress_state["cancel_event"] = None
-            raise HTTPException(status_code=499, detail="Scan cancelled")
-
+    except subprocess.TimeoutExpired:
         with _scan_progress_lock:
             _scan_progress_state["running"] = False
-            _scan_progress_state["phase"] = "done"
-            _scan_progress_state["manifest_path"] = result["manifest_path"]
-            _scan_progress_state["manifest_id"] = result["manifest_id"]
-            _scan_progress_state["total_files"] = result["total_files"]
-            _scan_progress_state["error"] = None
-            _scan_progress_state["cancel_event"] = None
-
-        return result
-
-    except HTTPException:
-        raise
+            _scan_progress_state["error"] = "timeout"
+        raise HTTPException(status_code=504, detail="Scan timed out (300s)")
     except Exception as e:
         with _scan_progress_lock:
             _scan_progress_state["running"] = False
-            _scan_progress_state["phase"] = "error"
             _scan_progress_state["error"] = str(e)
-            _scan_progress_state["cancel_event"] = None
         raise HTTPException(status_code=500, detail=f"Scan error: {e}")
+
+    if result.returncode != 0:
+        with _scan_progress_lock:
+            _scan_progress_state["running"] = False
+            _scan_progress_state["error"] = result.stderr
+        raise HTTPException(status_code=500, detail=f"Scan failed: {result.stderr or result.stdout}")
+
+    # Find the manifest written by organizer.py
+    scan_files = sorted(SCANS_DIR.glob("scan_*.json"))
+    if not scan_files:
+        with _scan_progress_lock:
+            _scan_progress_state["running"] = False
+        raise HTTPException(status_code=500, detail="Scan produced no manifest")
+    latest = scan_files[-1]
+
+    try:
+        with open(latest, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+        total_files = manifest.get("scan_meta", {}).get("total_files", 0)
+    except Exception:
+        manifest = {}
+        total_files = 0
+
+    manifest_id = latest.stem
+
+    # Store in memory registry too
+    with _registry_lock:
+        _manifest_registry[manifest_id] = manifest
+
+    # Update progress state
+    with _scan_progress_lock:
+        _scan_progress_state["running"] = False
+        _scan_progress_state["phase"] = "done"
+        _scan_progress_state["manifest_path"] = str(latest)
+        _scan_progress_state["manifest_id"] = manifest_id
+        _scan_progress_state["total_files"] = total_files
+
+    # Compute duplicates and tier data
+    try:
+        from scanner.duplicate import CrossPathDuplicateFinder
+        finder = CrossPathDuplicateFinder(manifest.get("files", []))
+        dupes = finder.find()
+        tier1 = dupes.get("tier1", [])
+        tier2 = dupes.get("tier2", [])
+        tier3 = dupes.get("tier3") or []
+    except Exception:
+        tier1, tier2, tier3 = [], [], []
+
+    return {
+        "status": "ok",
+        "manifest_path": str(latest),
+        "manifest_id": manifest_id,
+        "total_files": total_files,
+        "tier1": tier1,
+        "tier2": tier2,
+        "tier3": tier3,
+    }
 
 
 @app.get("/api/scan/status")
@@ -394,6 +351,7 @@ async def api_scan_cancel():
     """Cancel the currently running scan."""
     with _scan_progress_lock:
         if not _scan_progress_state["running"]:
+            _scan_progress_state["running"] = False
             return {"ok": False, "reason": "No scan in progress"}
         cancel_event = _scan_progress_state.get("cancel_event")
         if cancel_event:
