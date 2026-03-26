@@ -429,19 +429,19 @@ async def api_list_scans():
 @app.get("/api/scans/{scan_id}")
 async def api_get_scan(scan_id: str):
     """Return scan metadata including the manifest path for a given scan id."""
+    manifest_path = SCANS_DIR / f"{scan_id}.json"
     with _registry_lock:
         if scan_id in _manifest_registry:
             manifest = _manifest_registry[scan_id]
             meta = manifest.get("scan_meta", {})
             return {
                 "manifest_id": scan_id,
-                "manifest_path": _scan_progress_state.get("manifest_path", scan_id) or scan_id,
+                "manifest_path": str(manifest_path) if manifest_path.exists() else scan_id,
                 "manifest": manifest,
                 "total_files": meta.get("total_files", 0),
                 "scan_date": meta.get("scan_date", meta.get("timestamp", "")),
             }
 
-    manifest_path = SCANS_DIR / f"{scan_id}.json"
     if not manifest_path.exists():
         raise HTTPException(status_code=404, detail=f"Scan not found: {scan_id}")
 

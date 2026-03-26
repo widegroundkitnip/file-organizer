@@ -797,13 +797,14 @@ function updateFilterValueLabel() {
 // ---------------------------------------------------------------------------
 
 async function buildPreview() {
+  let settings = state.settings || {};
   if (!state.manifest) {
     showAlert('preview-alert', 'warning', 'No scan loaded. Run a scan first.');
     return;
   }
   if (!state.manifestPath) {
     // Try to get it from scan meta + settings
-    const settings = await api('GET', '/settings').catch(() => ({}));
+    settings = await api('GET', '/settings').catch(() => settings);
     const scanDir = settings.scan_output_dir || '';
     const meta = state.manifest.scan_meta || {};
     const ts = (meta.timestamp || '').replace('T','_').replace(/:/g,'').substring(0,15);
@@ -1596,7 +1597,7 @@ function updateIntentScopeVisibility() {
 function pollCrossPathProgress() {
   crosspathPollCount = 0;
   (function poll() {
-    api("GET", "/api/scans").then(function(scans) {
+    api("GET", "/scans").then(function(scans) {
       var latest = scans[0];
       var statusEl = document.getElementById("crosspath-status");
       if (latest && statusEl) {
@@ -1655,7 +1656,7 @@ async function runCrossPathScan() {
   }
   try {
     // Start scan and poll for progress in parallel
-    const scanPromise = api("POST", "/api/scan/multi", { paths, mode: "deep", include_hidden: false, exclude_dirs: [] });
+    const scanPromise = api("POST", "/scan/multi", { paths, mode: "deep", include_hidden: false, exclude_dirs: [] });
     pollCrossPathProgress();
     const data = await scanPromise;
     window.lastCrossPathData = data;
@@ -1789,7 +1790,7 @@ function openDuplicateReview(groupId, tier) {
   window._dupReviewState.currentGroup = group;
 
   // Fetch detailed review
-  api("POST", "/api/duplicates/review", {
+  api("POST", "/duplicates/review", {
     group_id: groupId,
     tier: tier,
     files: files,
@@ -1920,7 +1921,7 @@ async function confirmDuplicateReview(groupId, tier) {
   }
 
   try {
-    var result = await api("POST", "/api/duplicates/execute-review", {
+    var result = await api("POST", "/duplicates/execute-review", {
       group_id: groupId,
       tier: tier,
       keeper_path: selectedKeeper,
@@ -2036,7 +2037,7 @@ function ignoreProjectDetection(path) {
 function approveUnknown(path) {
   // Create a rule to move this file to Unknown/Approved
   var template = "Unknown/Approved/{name}.{ext}";
-  api("POST", "/api/plan", {
+  api("POST", "/plan", {
     manifest: window.lastCrossPathData ? window.lastCrossPathData.manifest : { files: [] },
     rules: [{
       name: "Approve",
@@ -2065,7 +2066,7 @@ function approveUnknown(path) {
 function rejectUnknown(path) {
   // Create a rule to move this file to Trash
   var template = "Trash/{name}.{ext}";
-  api("POST", "/api/plan", {
+  api("POST", "/plan", {
     manifest: window.lastCrossPathData ? window.lastCrossPathData.manifest : { files: [] },
     rules: [{
       name: "Reject",
@@ -2637,7 +2638,7 @@ var origToggleRule = toggleRule;
 
 async function loadProfiles() {
     try {
-        var profiles = await api("GET", "/api/profiles");
+        var profiles = await api("GET", "/profiles");
         var container = document.getElementById("profile-selector");
         if (!container) return;
 
@@ -2679,7 +2680,7 @@ function selectProfile(profileId) {
 
 async function syncScopeModeFromProfile(profileId) {
     try {
-        var profiles = await api("GET", "/api/profiles");
+        var profiles = await api("GET", "/profiles");
         var profile = profiles.find(function(p) { return p.id === profileId; });
         if (!profile) return;
         var allowed = profile.allowed_scope_modes || [];
@@ -2722,7 +2723,7 @@ async function syncScopeModeFromProfile(profileId) {
 
 async function generateProfileRules(profileId) {
     try {
-        var res = await api("POST", "/api/profiles/" + profileId + "/generate-rules");
+        var res = await api("POST", "/profiles/" + profileId + "/generate-rules");
         if (res.count > 0) {
             await loadRules();
             renderRules();
