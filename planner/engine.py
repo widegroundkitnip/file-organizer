@@ -38,6 +38,18 @@ PLANNER_STATUS_TYPES = frozenset({
 
 
 @dataclass
+class SrcIdentity:
+    """
+    SPRINT-9: Source file identity at plan time.
+    Used for revalidation before execution and already_done detection.
+    """
+    path_at_plan_time: str = ""
+    size_at_plan_time: int = 0
+    modified_time_at_plan_time: float = 0.0
+    hash_if_available: str = ""
+
+
+@dataclass
 class PlannedAction:
     """
     ARCH-003 / EXEC-001: Planner's output — intent to act.
@@ -98,8 +110,15 @@ class PlannedAction:
     dst_md5: str = ""
     checksum_status: str = ""   # "" | "verified" | "mismatch" | "skipped" | "error"
 
+    # SPRINT-9: Action identity for idempotency & revalidation
+    action_id: str = ""         # UUID for this specific action (links plan→exec→undo→verify)
+    src_identity: SrcIdentity = field(default_factory=SrcIdentity)
+
     def to_dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        # serialize src_identity as nested dict
+        d["src_identity"] = asdict(self.src_identity)
+        return d
 
 
 # Backward-compatibility alias — existing code uses `Action`
@@ -115,6 +134,7 @@ class ExecutionResult:
     is never polluted by executor implementation details.
     """
     # Which planned action this result corresponds to
+    action_id: str = ""   # SPRINT-9: links back to PlannedAction.action_id
     src: str = ""
     plan_id: str = ""
 
@@ -268,12 +288,19 @@ def plan_from_manifest(
         # RULE 1: Unknown/system files — route to unknown_review status (ARCH-001)
         if classification in ("unknown", "system"):
             actions.append(PlannedAction(
+                action_id=str(uuid.uuid4()),
                 action_type="skip",
                 src=path,
                 plan_id=plan_id,
                 rule_matched="[auto: unknown file]",
                 status="unknown_review",
                 classification=classification,
+                src_identity=SrcIdentity(
+                    path_at_plan_time=path,
+                    size_at_plan_time=file.get("size_bytes", 0),
+                    modified_time_at_plan_time=file.get("mtime", 0.0),
+                    hash_if_available=file.get("md5", ""),
+                ),
             ))
             matched_paths.add(path)
             continue
@@ -305,6 +332,7 @@ def plan_from_manifest(
                 verify_md5 = (rule.action == "move")
 
                 actions.append(PlannedAction(
+                    action_id=str(uuid.uuid4()),
                     action_type=rule.action,
                     src=path,
                     dst=dst,
@@ -317,11 +345,19 @@ def plan_from_manifest(
                     conflict_mode=rule.conflict_mode,
                     classification="known",
                     verify_checksum=verify_md5,
+                    # SPRINT-9: capture source identity at plan time for revalidation
+                    src_identity=SrcIdentity(
+                        path_at_plan_time=path,
+                        size_at_plan_time=file.get("size_bytes", 0),
+                        modified_time_at_plan_time=file.get("mtime", 0.0),
+                        hash_if_available=file.get("md5", ""),
+                    ),
                 ))
 
             # Record action even when no destinations (skip/delete rules)
             if not dests:
                 actions.append(PlannedAction(
+                    action_id=str(uuid.uuid4()),
                     action_type=rule.action,
                     src=path,
                     dst="",
@@ -334,6 +370,12 @@ def plan_from_manifest(
                     conflict_mode=rule.conflict_mode,
                     classification="known",
                     verify_checksum=False,
+                    src_identity=SrcIdentity(
+                        path_at_plan_time=path,
+                        size_at_plan_time=file.get("size_bytes", 0),
+                        modified_time_at_plan_time=file.get("mtime", 0.0),
+                        hash_if_available=file.get("md5", ""),
+                    ),
                 ))
 
             matched_paths.add(path)
@@ -343,12 +385,19 @@ def plan_from_manifest(
         # No rule matched → skip
         if not action_taken:
             actions.append(PlannedAction(
+                action_id=str(uuid.uuid4()),
                 action_type="skip",
                 src=path,
                 plan_id=plan_id,
                 rule_matched="[none]",
                 status="skipped_no_rule",
                 classification="known",
+                src_identity=SrcIdentity(
+                    path_at_plan_time=path,
+                    size_at_plan_time=file.get("size_bytes", 0),
+                    modified_time_at_plan_time=file.get("mtime", 0.0),
+                    hash_if_available=file.get("md5", ""),
+                ),
             ))
             matched_paths.add(path)
 

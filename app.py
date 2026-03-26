@@ -702,12 +702,17 @@ async def api_execute(req: ExecuteRequest):
                 "action": "delete",
                 "path": item.get("src", item.get("path", "")),
                 "plan_id": item.get("plan_id", ""),
+                # SPRINT-9: action identity
+                "action_id": item.get("action_id", ""),
+                "src_identity": item.get("src_identity", {}) or {},
             })
         elif action == "skip":
             normalized_plan.append({
                 "action": "skip",
                 "path": item.get("src", item.get("path", "")),
                 "plan_id": item.get("plan_id", ""),
+                "action_id": item.get("action_id", ""),
+                "src_identity": item.get("src_identity", {}) or {},
             })
         elif action in ("move", "copy", "merge"):
             normalized_plan.append({
@@ -717,6 +722,9 @@ async def api_execute(req: ExecuteRequest):
                 "plan_id": item.get("plan_id", ""),
                 "verify_checksum": item.get("verify_checksum", False),
                 "conflict_mode": item.get("conflict_mode", "rename"),
+                # SPRINT-9: action identity
+                "action_id": item.get("action_id", ""),
+                "src_identity": item.get("src_identity", {}) or {},
             })
         else:
             # Unknown action — skip it (shouldn't happen after status filter)
@@ -782,21 +790,36 @@ async def api_execute(req: ExecuteRequest):
     stdout = result.stdout or ""
     completed = 0
     failed = 0
+    already_done = 0
+    stale = 0
+    run_status = "unknown"
     for line in stdout.splitlines():
         if "[DONE]" in line:
             import re
+            m = re.search(r"run_status=(\w+)", line)
+            if m:
+                run_status = m.group(1)
             m = re.search(r"ok=(\d+)", line)
             if m:
                 completed = int(m.group(1))
             m = re.search(r"errors=(\d+)", line)
             if m:
                 failed = int(m.group(1))
+            m = re.search(r"already_done=(\d+)", line)
+            if m:
+                already_done = int(m.group(1))
+            m = re.search(r"stale=(\d+)", line)
+            if m:
+                stale = int(m.group(1))
 
     return {
         "status": "ok",
         "undo_log": undo_log,
+        "run_status": run_status,
         "completed": completed,
         "failed": failed,
+        "already_done": already_done,
+        "stale": stale,
         "stdout": stdout[-2000:],  # last 2kb of output
     }
 
