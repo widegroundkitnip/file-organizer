@@ -4,6 +4,7 @@ from pathlib import Path as _Path
 
 from .rules import RuleManager, Rule, FilterCondition
 from .engine import plan_from_manifest, check_boundary_conflicts, check_unknown_files
+from .duplicates import resolve_duplicates
 from .templates import apply_template, format_size
 
 
@@ -16,5 +17,6 @@ def load_manifest(path: str) -> dict:
 __all__ = [
     "RuleManager", "Rule", "FilterCondition",
     "plan_from_manifest", "check_boundary_conflicts", "check_unknown_files",
+    "resolve_duplicates",
     "apply_template", "format_size", "load_manifest",
 ]

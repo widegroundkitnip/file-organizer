@@ -48,10 +48,20 @@ def load_plan(plan_path: str) -> list:
     return plan
 
 
-# Executor action types — ARCH-001: only these 5 actions reach the executor
+# Executor action types — explicit planner→executor contract
 # protected / blocked / unknown_review / conflict_review are planner statuses,
 # never action types and never reach the executor
-EXECUTOR_ACTION_TYPES = frozenset({"move", "copy", "delete", "skip", "merge"})
+ALLOWED_ACTIONS = frozenset({"move", "copy", "delete", "skip"})
+
+
+def reject_disallowed_actions(plan: list) -> None:
+    for i, entry in enumerate(plan):
+        action = entry.get("action")
+        if action not in ALLOWED_ACTIONS:
+            raise ValueError(
+                f"Disallowed executor action at plan[{i}]: {action!r} "
+                f"(allowed: {', '.join(sorted(ALLOWED_ACTIONS))})"
+            )
 
 
 def validate_plan(plan: list) -> None:
@@ -59,13 +69,10 @@ def validate_plan(plan: list) -> None:
     Note: protected / blocked / unknown_review / conflict_review are filtered
     upstream and never reach the executor."""
     errors = []
+    reject_disallowed_actions(plan)
 
     for i, entry in enumerate(plan):
         action = entry.get("action")
-        if action not in EXECUTOR_ACTION_TYPES:
-            errors.append(f"[{i}] Unknown executor action: {action!r} "
-                          "(allowed: {', '.join(sorted(EXECUTOR_ACTION_TYPES))})")
-            continue
 
         if action == "move":
             src = entry.get("src", "")
@@ -81,13 +88,6 @@ def validate_plan(plan: list) -> None:
                 errors.append(f"[{i}] copy.src is not absolute: {src!r}")
             if not os.path.isabs(dst):
                 errors.append(f"[{i}] copy.dst is not absolute: {dst!r}")
-        elif action == "merge":
-            src = entry.get("src", "")
-            dst = entry.get("dst", "")
-            if not os.path.isabs(src):
-                errors.append(f"[{i}] merge.src is not absolute: {src!r}")
-            if not os.path.isabs(dst):
-                errors.append(f"[{i}] merge.dst is not absolute: {dst!r}")
         elif action == "delete":
             path = entry.get("path", "")
             if not os.path.isabs(path):
@@ -203,28 +203,6 @@ class UndoLog:
                     "checksum_status": "",
                     "src_identity": entry.get("src_identity", {}) or {},
                 })
-            elif action == "merge":
-                self._payload["actions"].append({
-                    "action": "merge",
-                    "action_id": entry.get("action_id", ""),
-                    "plan_id": entry.get("plan_id", ""),
-                    "src": entry["src"],
-                    "dst": entry["dst"],
-                    "actual_dst": None,
-                    "status": "pending",
-                    "started_at": None,
-                    "completed_at": None,
-                    "error_type": "",
-                    "error_message": "",
-                    "warning_message": "",
-                    "reverse_action": None,
-                    "source_revalidation_result": None,
-                    "runtime_conflict_result": None,
-                    "src_md5": None,
-                    "dst_md5": None,
-                    "checksum_status": "",
-                    "src_identity": entry.get("src_identity", {}) or {},
-                })
             elif action == "delete":
                 self._payload["actions"].append({
                     "action": "delete",
@@ -309,7 +287,7 @@ def preflight_check(plan: list, trash_dir: Path, dry_run: bool) -> list[dict]:
     for i, entry in enumerate(plan):
         action = entry["action"]
 
-        if action in ("move", "copy", "merge"):
+        if action in ("move", "copy"):
             src = entry["src"]
             dst = entry["dst"]
             dst_parent = str(Path(dst).parent)
@@ -496,7 +474,7 @@ def revalidate_source(entry: dict) -> dict:
             }
 
     # Destination parent still writable
-    if entry.get("action") in ("move", "copy", "merge"):
+    if entry.get("action") in ("move", "copy"):
         dst = entry.get("dst", "")
         if dst:
             dst_parent = str(Path(dst).parent)
@@ -546,7 +524,7 @@ def check_runtime_conflict(entry: dict) -> dict:
         resolution = "skip"
 
     # Destination now exists when we expected it not to
-    if action in ("move", "copy", "merge") and dst:
+    if action in ("move", "copy") and dst:
         if os.path.exists(dst):
             # Check if dst is the same file (hardlink or already done)
             try:
@@ -637,12 +615,13 @@ def execute_plan(
     - Runtime conflict recheck before every action.
     - already_done detection for rerun safety.
 
-    Executor actions: move | copy | delete | skip | merge
+    Executor actions: move | copy | delete | skip
     NOTE: protected / blocked / unknown_review / conflict_review are
     planner statuses — these never reach execute_plan() (filtered upstream).
 
     on_conflict: 'skip' | 'rename' | 'overwrite'
     """
+    reject_disallowed_actions(plan)
     trash_dir = None if dry_run else make_trash_dir(output_dir)
 
     for idx, entry in enumerate(plan):
@@ -718,7 +697,7 @@ def execute_plan(
             continue
 
         # ── CONFLICT RESOLUTION ─────────────────────────────────────────────
-        if action in ("move", "copy", "merge") and dst and os.path.exists(dst):
+        if action in ("move", "copy") and dst and os.path.exists(dst):
             if rt_conflict["resolution"] == "rename":
                 dst = resolve_rename(dst)
                 print(f"[RENAME] conflict resolved → {dst!r}")
@@ -803,13 +782,6 @@ def execute_plan(
                 print(f"[OK] copy {src!r} → {dst!r}")
                 undo_log.update(idx, status="ok", actual_dst=dst)
 
-            elif action == "merge":
-                Path(dst_parent).mkdir(parents=True, exist_ok=True)
-                with open(src, "rb") as sf, open(dst, "ab") as df:
-                    shutil.copyfileobj(sf, df)
-                print(f"[OK] merge {src!r} → {dst!r}")
-                undo_log.update(idx, status="ok", actual_dst=dst)
-
             elif action == "delete":
                 path = entry["path"]
                 filename = os.path.basename(path)
@@ -850,6 +822,34 @@ def execute_plan(
         undo_log.update(idx, completed_at=datetime.now(timezone.utc).isoformat())
 
     return undo_log.records
+
+
+class Executor:
+    """Compatibility wrapper for import-based callers."""
+
+    ALLOWED_ACTIONS = ALLOWED_ACTIONS
+
+    @staticmethod
+    def validate(plan: list) -> None:
+        validate_plan(plan)
+
+    @staticmethod
+    def execute(
+        plan: list,
+        output_dir: str | Path,
+        dry_run: bool = True,
+        on_conflict: str = "skip",
+    ) -> list:
+        resolved_output_dir = Path(output_dir).resolve()
+        validate_plan(plan)
+        resolved_output_dir.mkdir(parents=True, exist_ok=True)
+        undo_log = UndoLog(resolved_output_dir, dry_run=dry_run)
+        undo_log.init_pending(plan)
+        undo_log._payload["run_status"] = "running"
+        undo_log._flush()
+        execute_plan(plan, resolved_output_dir, dry_run, on_conflict, undo_log)
+        undo_log.finalize()
+        return undo_log.records
 
 
 # ---------------------------------------------------------------------------

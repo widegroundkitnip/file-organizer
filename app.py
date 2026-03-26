@@ -43,7 +43,7 @@ from typing import List
 from scanner import build_cross_manifest, CrossPathDuplicateFinder, StructureAnalyzer
 from scanner.manifest import ExtendedManifestBuilder
 from scanner.duplicate import find_similar_duplicates
-from planner import plan_from_manifest, RuleManager
+from planner import plan_from_manifest, RuleManager, resolve_duplicates
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -175,7 +175,9 @@ class DuplicateConsolidateRequest(BaseModel):
     group_id: int
     tier: str
     keeper_path: str  # path the user chose to keep
-    # Other paths → moved to trash (executor receives delete actions)
+    files: list[dict]
+    dry_run: bool = True
+    output_dir: str = ""
 
 
 class DuplicateConsolidateResponse(BaseModel):
@@ -695,11 +697,11 @@ async def api_duplicate_execute_review(req: DuplicateConsolidateRequest):
     """
     SPRINT-10: Execute a duplicate consolidation decision.
 
-    User chose keeper_path → executor receives: delete_to_trash for all other paths.
+    User chose keeper_path → planner resolves the group into standard actions only.
     Grouped transaction with single undo log entry per file.
 
-    The plan emitted is a list of delete actions (one per duplicate to trash),
-    all tagged with the same group_id for undo grouping.
+    The emitted plan contains only move/delete actions, all tagged with the same
+    group_id for undo grouping.
     """
     import uuid
 
@@ -718,21 +720,14 @@ async def api_duplicate_execute_review(req: DuplicateConsolidateRequest):
             dry_run=req.dry_run,
         )
 
-    # Build grouped action plan — all delete actions for this group
-    action_plan = []
-    action_ids = []
-    group_id_str = f"dup_merge_{req.group_id}_{uuid.uuid4().hex[:8]}"
-
-    for path in trash_paths:
-        action_id = str(uuid.uuid4())
-        action_ids.append(action_id)
-        action_plan.append({
-            "action": "delete",
-            "path": path,
-            "plan_id": group_id_str,
-            "action_id": action_id,
-            "src_identity": {},
-        })
+    group_id_str = f"dup_resolve_{req.group_id}_{uuid.uuid4().hex[:8]}"
+    action_plan = resolve_duplicates({
+        "group_id": group_id_str,
+        "keeper_path": keeper_path,
+        "files": req.files,
+        "canonical_path": keeper_path,
+    })
+    action_ids = [item["action_id"] for item in action_plan]
 
     # Write plan to temp file
     with tempfile.NamedTemporaryFile(
@@ -903,7 +898,7 @@ async def api_execute(req: ExecuteRequest):
 
     # Normalize plan to executor field names:
     # planner returns: action_type, src, dst, plan_id, ...
-    # executor expects: action (not action_type), path (for delete/skip), src/dst (for move/copy/merge)
+    # executor expects: action (not action_type), path (for delete/skip), src/dst (for move/copy)
     normalized_plan = []
     for item in executable_plan:
         action = item.get("action_type") or item.get("action", "skip")
@@ -925,7 +920,7 @@ async def api_execute(req: ExecuteRequest):
                 "action_id": item.get("action_id", ""),
                 "src_identity": item.get("src_identity", {}) or {},
             })
-        elif action in ("move", "copy", "merge"):
+        elif action in ("move", "copy"):
             normalized_plan.append({
                 "action": action,
                 "src": item.get("src", ""),
