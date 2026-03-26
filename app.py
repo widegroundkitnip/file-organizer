@@ -422,6 +422,25 @@ async def api_scan_cancel():
     return {"ok": True}
 
 
+@app.post("/api/scan/reset")
+async def api_scan_reset():
+    """Clear stale scan state after a conflict or interrupted run."""
+    with _scan_progress_lock:
+        cancel_event = _scan_progress_state.get("cancel_event")
+        if cancel_event:
+            cancel_event.set()
+        _scan_progress_state["running"] = False
+        _scan_progress_state["phase"] = "idle"
+        _scan_progress_state["current_path"] = ""
+        _scan_progress_state["files_found"] = 0
+        _scan_progress_state["manifest_path"] = None
+        _scan_progress_state["manifest_id"] = None
+        _scan_progress_state["total_files"] = 0
+        _scan_progress_state["error"] = None
+        _scan_progress_state["cancel_event"] = None
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------------------
 # API: Manifest
 # ---------------------------------------------------------------------------

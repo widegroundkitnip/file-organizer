@@ -2,7 +2,6 @@ import json
 import os
 import hashlib
 import mimetypes
-import xxhash
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -13,6 +12,11 @@ from .utils import classify_file, is_venv_dir, is_git_dir, is_pycache, get_relat
 from .project_detect import detect_projects_in_dir
 
 try:
+    import xxhash
+except ImportError:
+    xxhash = None
+
+try:
     from PIL import ExifTags, Image
 except ImportError:
     ExifTags = None
@@ -20,6 +24,12 @@ except ImportError:
 
 LARGE_FILE_THRESHOLD = 100 * 1024 * 1024  # 100 MB
 HASH_CACHE_SIZE = 8 * 1024  # xxhash chunk size for prefix hash (8KB)
+
+
+def _new_prefix_hasher():
+    if xxhash is not None:
+        return xxhash.xxh64()
+    return hashlib.md5()
 
 @dataclass
 class ScannedFile:
@@ -311,8 +321,8 @@ class ExtendedManifestBuilder:
         return value or None
 
     def _prefix_hash(self, path: str) -> str:
-        """Fast xxhash of first 8KB."""
-        h = xxhash.xxh64()
+        """Fast prefix hash of first 8KB, with hashlib fallback when xxhash is unavailable."""
+        h = _new_prefix_hasher()
         try:
             with open(path, "rb") as f:
                 chunk = f.read(HASH_CACHE_SIZE)

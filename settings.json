@@ -2,7 +2,7 @@
   "base_output_dir": "/tmp/file-organizer-output",
   "default_conflict_mode": "rename",
   "trash_dir": "/tmp/file-organizer-trash",
-  "scan_output_dir": "/home/sigge/projects/file-organizer/scans",
+  "scan_output_dir": "",
   "categories": {
     "Images": {"enabled": true, "subfolders": ["Photos", "Screenshots", "Raw", "Other"]},
     "Documents": {"enabled": true, "subfolders": ["PDFs", "Text", "Spreadsheets", "Other"]},
