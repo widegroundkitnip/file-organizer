@@ -407,6 +407,9 @@ async def api_get_rules():
 @app.put("/api/rules")
 async def api_put_rules(body: RulesUpdate):
     from planner.rules import Rule
+    # Load existing rules for comparison (to detect created vs modified)
+    rm_existing = RuleManager(str(BASE_DIR / "rules.json"))
+    existing_ids = {r.id for r in rm_existing.rules}
     rules = []
     for i, r in enumerate(body.rules):
         try:
@@ -415,12 +418,171 @@ async def api_put_rules(body: RulesUpdate):
             raise HTTPException(400, detail=f"Rule #{i} ('{r.get('name','?')}'): {e}")
     rm = RuleManager(str(BASE_DIR / "rules.json"))
     try:
+        # Detect rule_created vs rule_modified events
+        new_ids = {r.id for r in rules}
+        from planner.learner import log_rule_created, log_rule_modified
+        for rule in rules:
+            if rule.id in existing_ids:
+                log_rule_modified(rule.to_dict())
+            else:
+                log_rule_created(rule.to_dict())
         rm.rules = rules
         rm.save()
     except Exception as e:
         logger.error(f"[RULES] Failed to save rules: {e}")
         raise HTTPException(500, detail=f"Failed to save rules: {e}")
     return {"status": "ok", "rules": [r.to_dict() for r in rm.rules]}
+
+
+# ---------------------------------------------------------------------------
+# API: Learner — Suggestions
+# ---------------------------------------------------------------------------
+
+from pydantic import BaseModel
+
+
+class SuggestionActionRequest(BaseModel):
+    suggestion: dict
+    rule: dict  # the proposed_rule converted to a full Rule dict
+
+
+class LearnerActionEvent(BaseModel):
+    """Log an approved action for the learner."""
+    path: str
+    ext: str = ""
+    category: str = "other"
+    parent: str = ""
+    tree: str = ""
+    size_bytes: int = 0
+    action_type: str = "move"
+    src: str = ""
+    dst: str = ""
+    destination_template: str = ""
+    rule_id: Optional[str] = None
+    scope_mode: str = "preserve_parent_boundaries"
+
+
+@app.get("/api/learner/suggestions")
+async def api_get_suggestions(days_back: int = 30):
+    """Return rule suggestions from pattern aggregation.
+
+    Runs all 4 pattern types against the event log and returns suggestions
+    that pass support_count >= 5 and consistency >= 0.8 thresholds.
+
+    Query params:
+        days_back: only consider events from the last N days (default 30)
+    """
+    try:
+        from planner import RuleManager
+        from planner.learner import get_suggestions, learner_stats
+        rm = RuleManager(str(BASE_DIR / "rules.json"))
+        suggestions = get_suggestions(days_back=days_back, active_rules=rm.rules)
+        stats = learner_stats(days_back=days_back)
+        return {"suggestions": suggestions, "stats": stats}
+    except Exception as e:
+        logger.error(f"[LEARNER] Failed to get suggestions: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Learner error: {e}")
+
+
+@app.post("/api/learner/suggestions/accept")
+async def api_accept_suggestion(body: SuggestionActionRequest):
+    """Accept a learner suggestion → log event, clear suppression, return rule dict."""
+    try:
+        from planner.learner import accept_suggestion
+        from planner.rules import Rule
+        accept_suggestion(body.suggestion)
+        rule = Rule.from_dict(body.rule)
+        rm = RuleManager(str(BASE_DIR / "rules.json"))
+        rm.add_rule(rule)
+        rm.save()
+        return {"status": "ok", "rule": rule.to_dict()}
+    except Exception as e:
+        logger.error(f"[LEARNER] Failed to accept suggestion: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Accept error: {e}")
+
+
+@app.post("/api/learner/suggestions/dismiss")
+async def api_dismiss_suggestion(body: SuggestionActionRequest):
+    """Dismiss a learner suggestion → log event, record suppression."""
+    try:
+        from planner.learner import dismiss_suggestion
+        dismiss_suggestion(body.suggestion)
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"[LEARNER] Failed to dismiss suggestion: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Dismiss error: {e}")
+
+
+@app.get("/api/learner/stats")
+async def api_learner_stats(days_back: int = 30):
+    """Return learner statistics: event counts, suppression state, storage path."""
+    try:
+        from planner.learner import learner_stats
+        return learner_stats(days_back=days_back)
+    except Exception as e:
+        logger.error(f"[LEARNER] Failed to get stats: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Learner stats error: {e}")
+
+
+@app.get("/api/learner/events")
+async def api_learner_events(days_back: int = 30, limit: int = 100):
+    """Return raw learner events (last N events, most recent first)."""
+    try:
+        from planner.learner import _iter_events
+        events = list(_iter_events(days_back=days_back))
+        events.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+        return {"events": events[:limit], "total": len(events)}
+    except Exception as e:
+        logger.error(f"[LEARNER] Failed to get events: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Learner events error: {e}")
+
+
+@app.post("/api/learner/log-action")
+async def api_log_action(event: LearnerActionEvent):
+    """
+    Log an approved action for the learner to observe.
+    Called by the UI when user confirms a batch in Preview/Execute.
+
+    Args:
+        path:          file path
+        ext:           extension (e.g. "jpg")
+        category:      file category (images/documents/video/etc.)
+        parent:        immediate parent folder name
+        tree:          root scan tree name
+        size_bytes:    file size in bytes
+        action_type:   move/copy/delete/skip
+        src:           source path
+        dst:           destination path
+        destination_template:  destination template used
+        rule_id:       rule that triggered this action (if any)
+        scope_mode:    current scope mode
+    """
+    try:
+        from planner.learner import log_action_approved
+        file_info = {
+            "path": event.path,
+            "ext": event.ext,
+            "category": event.category,
+            "parent": event.parent,
+            "tree": event.tree,
+            "size_bytes": event.size_bytes,
+        }
+        action_info = {
+            "type": event.action_type,
+            "src": event.src,
+            "dst": event.dst,
+            "destination_template": event.destination_template,
+        }
+        context_info = {
+            "rule_id": event.rule_id or "",
+            "scope_mode": event.scope_mode,
+            "user_confirmed": True,
+        }
+        event_id = log_action_approved(file_info, action_info, context_info)
+        return {"status": "ok", "event_id": event_id}
+    except Exception as e:
+        logger.error(f"[LEARNER] Failed to log action: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Log action error: {e}")
 
 
 # ---------------------------------------------------------------------------
