@@ -425,11 +425,39 @@ async function startScan() {
       mode: state.scanMode,
       include_hidden: document.getElementById('include-hidden')?.checked || false,
     });
-    const result = await api('POST', '/scan', {
+    const scanPromise = api('POST', '/scan', {
       path,
       mode: state.scanMode,
       include_hidden: document.getElementById('include-hidden')?.checked || false,
     }, { signal: controller.signal });
+    let polling = true;
+    const pollPromise = (async function pollScanStatus() {
+      while (polling) {
+        try {
+          const scanStatus = await api('GET', '/scan/status');
+          if (statusEl && scanStatus) {
+            const filesFound = Number(scanStatus.files_found || 0).toLocaleString();
+            const phase = scanStatus.phase || 'scanning';
+            statusEl.textContent = scanStatus.running
+              ? `Scanning… ${filesFound} files (${phase})`
+              : `Finalizing scan… ${filesFound} files`;
+          }
+        } catch (pollError) {
+          console.warn('[scan] status polling failed:', pollError.message);
+        }
+
+        const scanDone = await Promise.race([
+          scanPromise.then(() => true).catch(() => true),
+          new Promise(resolve => setTimeout(() => resolve(false), 500)),
+        ]);
+        if (scanDone) {
+          polling = false;
+        }
+      }
+    })();
+    const result = await scanPromise;
+    polling = false;
+    await pollPromise;
     console.log('[scan] /api/scan response', result);
 
     state.manifestPath = result.manifest_path || result.manifest_id;

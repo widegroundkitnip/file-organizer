@@ -46,6 +46,7 @@ from typing import List
 from scanner import build_cross_manifest, CrossPathDuplicateFinder, StructureAnalyzer
 from scanner.manifest import ExtendedManifestBuilder
 from scanner.duplicate import find_similar_duplicates
+from scanner.utils import find_empty_folders, find_hidden_folders
 from planner import plan_from_manifest, RuleManager, resolve_duplicates
 
 # ---------------------------------------------------------------------------
@@ -80,6 +81,66 @@ _scan_executor = ThreadPoolExecutor(max_workers=2)
 # Key: manifest_id (str), Value: full manifest dict
 _manifest_registry: dict[str, dict] = {}
 _registry_lock = threading.Lock()
+
+
+def _persist_manifest(manifest_path: Path, manifest: dict[str, Any]) -> None:
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f)
+
+
+async def _run_single_scan_analysis(
+    manifest_id: str,
+    manifest_path: Path,
+    scan_root: str,
+    include_hidden: bool,
+) -> None:
+    """Populate deferred duplicate/structure analysis after the initial file walk returns."""
+    try:
+        with _registry_lock:
+            manifest = _manifest_registry.get(manifest_id)
+        if manifest is None:
+            return
+
+        def run_analysis() -> dict[str, Any]:
+            files = manifest.get("files", [])
+            dupes = CrossPathDuplicateFinder(files).find()
+            tier1 = dupes.get("tier1", [])
+            tier2 = dupes.get("tier2", [])
+            tier3 = dupes.get("tier3") or find_similar_duplicates(files)
+            structure = StructureAnalyzer(manifest, [scan_root]).analyze()
+            unknown_files = [f for f in files if f.get("classification") in ("unknown", "system")]
+            return {
+                "duplicates": tier1 + tier2 + tier3,
+                "tier1": tier1,
+                "tier2": tier2,
+                "tier3": tier3,
+                "total_groups": len(tier1) + len(tier2) + len(tier3),
+                "structure": structure,
+                "unknown_files": unknown_files[:100],
+                "unknown_count": len(unknown_files),
+                "empty_folders": find_empty_folders(scan_root, include_hidden),
+                "hidden_folders": find_hidden_folders(scan_root),
+                "analysis_status": "ready",
+                "analysis_error": None,
+            }
+
+        analysis = await asyncio.get_running_loop().run_in_executor(_scan_executor, run_analysis)
+
+        with _registry_lock:
+            current_manifest = _manifest_registry.get(manifest_id)
+            if current_manifest is None:
+                return
+            current_manifest.update(analysis)
+            persisted_manifest = dict(current_manifest)
+
+        _persist_manifest(manifest_path, persisted_manifest)
+    except Exception as exc:
+        logger.error("[SCAN] Deferred analysis failed for %s: %s", manifest_id, exc, exc_info=True)
+        with _registry_lock:
+            current_manifest = _manifest_registry.get(manifest_id)
+            if current_manifest is not None:
+                current_manifest["analysis_status"] = "error"
+                current_manifest["analysis_error"] = str(exc)
 
 # CORS — local dev, allow all
 app.add_middleware(
@@ -220,7 +281,7 @@ class DuplicateConsolidateResponse(BaseModel):
 
 @app.post("/api/scan")
 async def api_scan(req: ScanRequest):
-    """Run scan in-process and persist the manifest for preview compatibility."""
+    """Run the file walk now and defer heavier analysis to a background task."""
     path = os.path.expanduser(req.path)
     if not os.path.exists(path):
         raise HTTPException(status_code=400, detail=f"Path does not exist: {path}")
@@ -274,14 +335,21 @@ async def api_scan(req: ScanRequest):
         manifest_id = manifest_path.stem
         total_files = manifest.get("scan_meta", {}).get("total_files") or len(manifest.get("files", []))
 
+        manifest["duplicates"] = []
+        manifest["tier1"] = []
+        manifest["tier2"] = []
+        manifest["tier3"] = []
+        manifest["total_groups"] = 0
+        manifest["structure"] = {}
+        manifest["unknown_files"] = []
+        manifest["unknown_count"] = 0
+        manifest["empty_folders"] = []
+        manifest["hidden_folders"] = []
+        manifest["analysis_status"] = "pending"
+        manifest["analysis_error"] = None
+
         with _registry_lock:
             _manifest_registry[manifest_id] = manifest
-
-        finder = CrossPathDuplicateFinder(manifest.get("files", []))
-        dupes = finder.find()
-        tier1 = dupes.get("tier1", [])
-        tier2 = dupes.get("tier2", [])
-        tier3 = dupes.get("tier3") or []
 
         with _scan_progress_lock:
             _scan_progress_state["running"] = False
@@ -299,14 +367,22 @@ async def api_scan(req: ScanRequest):
             _scan_progress_state["cancel_event"] = None
         raise HTTPException(status_code=500, detail=f"Scan error: {e}")
 
+    asyncio.create_task(
+        _run_single_scan_analysis(
+            manifest_id=manifest_id,
+            manifest_path=manifest_path,
+            scan_root=path,
+            include_hidden=req.include_hidden,
+        )
+    )
+
     return {
         "status": "ok",
         "manifest_path": str(manifest_path),
         "manifest_id": manifest_id,
         "total_files": total_files,
-        "tier1": tier1,
-        "tier2": tier2,
-        "tier3": tier3,
+        "manifest": manifest,
+        "is_empty": total_files == 0,
     }
 
 
