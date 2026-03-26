@@ -491,11 +491,10 @@ async function stopScan() {
     controller.abort();
     state.scanAbortController = null;
     state.scanCancelRequested = false;
-    if (stopBtn) {
-      stopBtn.classList.add('hidden');
-      stopBtn.disabled = false;
-      stopBtn.textContent = '⏹ Stop Scan';
-    }
+    const btn = document.getElementById('btn-scan');
+    const stopBtn = document.getElementById('btn-stop-scan');
+    if (btn) { btn.disabled = false; btn.innerHTML = '🔍 Start Scan'; }
+    if (stopBtn) { stopBtn.classList.add('hidden'); }
   }
 }
 
