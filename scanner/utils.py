@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from typing import Set
 
-# Directories always excluded from scanning (migrated from organizer.py)
+# Directories always excluded from scanning (migrated from legacy/organizer.py)
 ALWAYS_EXCLUDED: Set[str] = {
     ".git", ".svn", ".DS_Store", "__pycache__", ".Trash",
     "$RECYCLE.BIN", "System Volume Information", "pagefile.sys", "Thumbs.db",
@@ -58,7 +58,7 @@ def is_hidden(name: str, path: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Empty / hidden folder detection (migrated from organizer.py)
+# Empty / hidden folder detection (migrated from legacy/organizer.py)
 # ---------------------------------------------------------------------------
 
 def find_empty_folders(root: str, include_hidden: bool) -> list[str]:
