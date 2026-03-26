@@ -1,8 +1,8 @@
 # File Organizer & Deduper
 
-A fast, local-first file intelligence platform. Scan, understand, deduplicate, organize, and (with v2) get AI-powered suggestions on your file ecosystem.
+A fast, local-first file intelligence platform. Scan, understand, deduplicate, organize, and get AI-powered suggestions on your file ecosystem.
 
-**Status:** Phase 3 development | [SPEC.md](SPEC.md) for full architecture
+**Status:** v1.0 — All sprints complete | [SPEC.md](SPEC.md) for full architecture
 
 ## Quick Start
 
@@ -12,145 +12,219 @@ uvicorn app:app --host 0.0.0.0 --port 3001 --reload
 # → http://localhost:3001
 ```
 
-## Phases
+## What It Does
 
-| Phase | Status | What |
-|-------|--------|------|
-| Phase 1 — Scan Engine | ✅ Done | Directory walking, hashing, duplicate detection, manifest builder |
-| Phase 2 — Execution Engine | ✅ Done | Safe move/delete, undo log, conflict detection, dry-run |
-| Phase 3 — Web UI + Rule Engine | 🔨 In Progress | Cross-path scanning, structure analysis, rule builder, multi-output modes |
-| Phase v2 — AI Layer | 🔜 Planned | Rule learning, structure analysis, duplicate summarizer, auto-organizer |
+1. **Scan** — walk any directory, build a manifest with hashes, categories, and metadata
+2. **Detect** — find duplicates (3 tiers), project roots, empty folders, unknown files
+3. **Plan** — template-based rules generate an action plan with full conflict detection
+4. **Preview** — visual before/after tree, see exactly what will change
+5. **Execute** — safe moves with undo, checksum verification, crash recovery
 
 ---
 
-## Phase 1 — Scan Engine
+## Architecture
 
-```bash
-python organizer.py scan --path /some/dir --mode fast
-python organizer.py scan --path /some/dir --mode deep
-python organizer.py scan --path /some/dir --mode deep --include-hidden
-python organizer.py scan --path /some/dir --mode fast --output-dir /tmp/scans/
+```
+scanner/          — Canonical scan engine
+  manifest.py     — ManifestScanner, ExtendedManifestBuilder
+  project_detect.py — Project root detection (confidence scoring)
+  duplicate.py    — Tier 1/2/3 duplicate detection + keeper recommendation
+  structure.py    — Path structure analysis
+  exif.py         — EXIF metadata extraction
+
+planner/          — Planning + rules engine
+  engine.py       — plan_from_manifest, template parsing
+  templates.py    — Template engine (fallback syntax, sanitization)
+  rules.py        — RuleManager with profile support
+  profiles.py     — 8 built-in goal-driven profiles
+  learner.py      — Local deterministic pattern learner
+
+executor/         — Execution engine
+  executor.py     — Safe move/copy/delete with undo log
 ```
 
-### Output Schema
+---
 
-```json
+## Scan Engine
+
+```bash
+POST /api/scan
 {
-  "scan_meta": {"path": "/some/dir", "mode": "fast", "total_files": 1234},
-  "files": [
-    {
-      "path": "/some/dir/photo.jpg",
-      "name": "photo.jpg",
-      "ext": "jpg",
-      "size_bytes": 204800,
-      "modified_ts": "2025-01-15T10:30:00+00:00",
-      "hash": "sha256:abc123..."
-    }
-  ],
-  "duplicate_groups": [
-    {"group_id": 0, "tier": "definite", "files": ["...a.jpg", "...b.jpg"], "hash": "sha256:abc123..."}
-  ],
-  "empty_folders": ["/some/dir/empty/"],
-  "hidden_folders": ["/some/dir/.hidden/"],
-  "category_preview": {"Images": 450, "Documents": 120, "Other": 60}
+  "path": "/some/dir",
+  "mode": "fast",          # fast = size+name, deep = full hash
+  "include_hidden": false,
+  "exclude_dirs": []
 }
 ```
 
-### Duplicate Tiers
+Returns: inline manifest with duplicates, structure analysis, detected project roots, empty/hidden folders.
 
-| Tier | Meaning |
-|------|---------|
-| `definite` | Exact SHA256 match |
-| `likely` | Same filename + size |
-
-**Notes:**
-- Files >100 MB are skipped for hashing (size+name proxy)
-- Hidden folders excluded by default
-- Always excluded: `.git`, `.svn`, `__pycache__`, `.Trash`, `$RECYCLE.BIN`, etc.
-- Phase 1 never moves or deletes files
-
----
-
-## Phase 2 — Execution Engine
-
-```bash
-python executor.py execute --plan plan.json --output-dir /tmp/fo-output/ --dry-run
-python executor.py execute --plan plan.json --output-dir /tmp/fo-output/
-```
-
-### Action Plan Schema
+### Manifest Schema (v2)
 
 ```json
-[
-  {"action": "move", "src": "/path/a.jpg", "dst": "/organized/Images/a.jpg"},
-  {"action": "delete", "path": "/path/duplicate.jpg"},
-  {"action": "skip", "path": "/path/keep-as-is.jpg"}
-]
+{
+  "scan_meta": {"path": "/some/dir", "mode": "fast", "schema_version": "2"},
+  "files": [...],
+  "detected_project_roots": [
+    {
+      "path": "/some/dir/.git",
+      "confidence_label": "high",
+      "confidence_score": 1.5,
+      "markers": [".git", "package.json"],
+      "recommended_handling": "protect_in_project_safe_mode"
+    }
+  ],
+  "duplicate_groups": [
+    {
+      "group_id": 0,
+      "tier": "definite",
+      "keeper_recommendation": {"path": "...", "reason": "newest mtime + largest size"},
+      "files": ["...a.jpg", "...b.jpg"]
+    }
+  ],
+  "stats": {"total_files": 1234, "by_category": {...}}
+}
 ```
-
-### Safety
-
-| Feature | Behavior |
-|---------|----------|
-| Dry-run | Logs every action, touches nothing |
-| Conflict detection | Skips existing destinations (no overwrite) |
-| No hard delete | Moves to `<output_dir>/trash/YYYY-MM-DD_HHMMSS/` |
-| Undo log | Full record of every action taken |
-| Atomic-ish | Stops on first error, partial undo preserved |
 
 ---
 
-## Phase 3 — Web UI (current development)
+## Duplicate Detection
 
-Open `app.py` via uvicorn (see Quick Start). Full workflow: **Scan → Results → Rules → Preview → Execute**
+| Tier | Meaning | Keeper Logic |
+|------|---------|-------------|
+| `definite` | Exact SHA256 hash match | User chooses at review |
+| `likely` | Same filename + size | User chooses at review |
+| `possible` | Similar name + size range | Informational only |
 
-### Features in development
-- Multi-folder selection and cross-path scanning
-- Structure analyzer (deep nesting, similar subtrees, venv detection)
-- Rule builder with live preview
-- Output modes: in-place, separate output, ask-per-folder
-- Duplicate browser with tier filtering
-
-### Phase 3 Architecture
-
-```
-scanner/       — Cross-path scan + duplicate detection
-planner/       — Rule engine + destination templates
-ai/            — AI layer (stubbed, v2)
-```
-
-See [SPEC.md](SPEC.md) for full architecture.
+**Duplicate review workflow:** scan → review button → see keeper recommendation + reason + metadata → choose keeper → consolidate to trash.
 
 ---
 
-## Phase v2 — AI Layer (planned)
+## Project Detection
 
-Inspired by OpenClaw's flexibility, but simplified for file organization:
+Automatically detects project roots using marker confidence scoring:
 
-### AI Providers
+| Tier | Markers | Weight |
+|------|---------|--------|
+| Strong | `.git`, `Cargo.toml`, `go.mod`, `*.xcodeproj` | 1.5 |
+| Medium | `package.json`, `pyproject.toml`, `requirements.txt` | 0.5 |
+| Weak | `__pycache__`, `node_modules`, `.venv` | supporting only |
 
-| Provider | Auth | Models |
-|---------|------|--------|
-| OpenAI | API key + OAuth | GPT-4o, 4o-mini, o3, o4-mini |
-| Anthropic | API key + OAuth | Claude 3.5 Sonnet, 3.7, Opus |
-| Google AI Studio | API key + OAuth | Gemini 2.0 Flash, 2.5 Pro, 3.0 |
-| Groq | API key | Llama 4, Mistral, Qwen |
-| Ollama | Local (no key) | Any local model |
-| LM Studio | Local (no key) | Any local model |
+**Scope modes:**
+- `project_safe_mode` — protect detected project roots
+- `preserve_parent_boundaries` — no project protection (default)
 
-### AI Features (v2)
-- **Rule learner**: observes your actions, suggests new organization rules
-- **Structure analyzer**: detects deep nesting, redundant folders, suggests flattening
-- **Duplicate summarizer**: groups duplicates by origin, estimates space savings
-- **Auto-organizer**: AI suggests where files should go based on content
-- **Image comparator**: perceptual hash + visual diff
-- **File semantic comparer**: embedding similarity for text/code
+---
 
-### AI Setup (v2)
+## Profiles (8 Built-in)
+
+| Profile | What It Does |
+|---------|---------------|
+| `general_organize` | Default rules for common file types |
+| `downloads_cleanup` | Recent Downloads by type/age |
+| `duplicates_review` | Cross-path duplicate scan |
+| `screenshots` | By-month screenshot gatherer |
+| `camera_import` | RAW + JPG + video, date-based naming |
+| `project_safe` | Broad rules with project protection on |
+| `mixed_sort` | Per-type by-month across all folders |
+| `review_only` | Scan only, no rules fire |
+
+---
+
+## Template Engine
+
+Full variable support with fallback syntax:
+
 ```
-Settings → Connect AI → Select provider → Paste API key or OAuth → Choose model → ✅ Connected
+{taken_year|created_year|year|Unknown}
+{name}.{ext}
+{original_path}
+{hash:8}
+{counter:03}
+{parent}
+{size_bucket}
 ```
-All credentials stored locally. No telemetry.
+
+**Example:** `Images/{taken_year|Unknown}/{name}.{ext}`
+
+**Features:**
+- Filename sanitization (Windows-safe, reserved names, max 255 chars)
+- Traversal risk detection (`../` blocked)
+- Unknown variable warnings at save/preview
+- strftime support: `{date:%Y-%m-%d}`
+
+---
+
+## Learner
+
+Local deterministic pattern aggregator — no cloud, no API calls.
+
+**How it works:**
+- Logs approved actions from the preview/execute flow
+- Aggregates patterns (extension → template, category → template)
+- Suggests new rules when threshold met (≥5 actions, ≥80% consistency)
+- User reviews, accepts or dismisses suggestions
+
+**Suggestion schema:**
+```json
+{
+  "type": "rule_suggestion",
+  "title": "Create rule for JPG images",
+  "support_count": 7,
+  "consistency": 0.875,
+  "confidence": 0.84,
+  "examples": ["...photo1.jpg → Images/2026/photo1.jpg"],
+  "proposed_rule": {"filter": {"type": "extension", "value": "jpg"}, ...}
+}
+```
+
+---
+
+## Execution Safety
+
+- **Dry-run mode** — preview every action, no files touched
+- **Checksum verification** — MD5 before/after every move
+- **Undo log** — full transaction record, reversible
+- **Trash** — no hard deletes, files go to `<output>/trash/YYYY-MM-DD_HHMMSS/`
+- **Idempotency** — reruns skip already-done actions
+- **Crash recovery** — transaction log survives partial completion
+- **Pre-execute revalidation** — checks source exists, size matches, dest writable
+- **Runtime conflict recheck** — destination exists, permissions unchanged at execution time
+
+---
+
+## API Endpoints
+
+| Endpoint | Method | What |
+|----------|--------|------|
+| `/api/scan` | POST | Scan a path |
+| `/api/scan/multi` | POST | Scan multiple paths |
+| `/api/detect-projects` | POST | Detect project roots |
+| `/api/manifest/{id}` | GET | Retrieve stored manifest |
+| `/api/preview` | POST | Generate action plan |
+| `/api/execute` | POST | Execute plan |
+| `/api/undo/{run_id}` | POST | Undo a run |
+| `/api/rules` | GET/PUT | Manage rules |
+| `/api/profiles` | GET | List profiles |
+| `/api/learner/suggestions` | GET | Get rule suggestions |
+| `/api/learner/suggestions/accept` | POST | Accept suggestion |
+| `/api/learner/suggestions/dismiss` | POST | Dismiss suggestion |
+| `/api/duplicates/review` | POST | Duplicate review details |
+| `/api/duplicates/execute-review` | POST | Execute duplicate consolidation |
+
+---
+
+## Extension Coverage
+
+50+ formats supported out of the box:
+
+**Images:** jpg, jpeg, png, gif, bmp, webp, svg, heic, dng, arw, cr2, nef, tiff, raw, avif, av1
+**Video:** mp4, mov, avi, mkv, wmv, webm, m4v, mpeg, flv
+**Audio:** mp3, wav, flac, aac, ogg, m4a, wma, alac
+**Documents:** pdf, doc, docx, txt, rtf, odt, xls, xlsx, csv, ppt, pptx, epub, mobi
+**Code:** py, js, ts, html, css, json, xml, yaml, md, ipynb, rs, rb, php, go, java, cpp, c, h, sh, sql
+**Archives:** zip, tar, gz, rar, 7z, iso, dmg
+**Other:** ico, pdf, ttf, otf, wasm
 
 ---
 
@@ -158,16 +232,27 @@ All credentials stored locally. No telemetry.
 
 ```
 file-organizer/
-├── organizer.py          # Phase 1 scan engine
-├── executor.py           # Phase 2 execution engine
-├── planner.py           # Phase 3 rule planner
-├── app.py               # FastAPI web app
-├── settings.json        # User settings
-├── requirements.txt
-├── SPEC.md             # Full architecture + v2 AI spec
-├── README.md
-├── scanner/            # Phase 3: cross-path scanning
-├── planner/             # Phase 3: rule engine
-├── ai/                 # Phase v2: AI layer
-└── data/               # Sample data (not on GitHub — 69MB)
+├── app.py                    # FastAPI web app (port 3001)
+├── executor.py               # Execution engine
+├── organizer.py             # ⚠️ Deprecated — CLI reference only
+├── scanner/
+│   ├── manifest.py          # Canonical scan engine
+│   ├── project_detect.py     # Project root detection
+│   ├── duplicate.py          # Duplicate detection + keeper rec
+│   ├── structure.py          # Structure analysis
+│   ├── exif.py               # EXIF metadata extraction
+│   └── utils.py             # Shared utilities
+├── planner/
+│   ├── engine.py            # plan_from_manifest
+│   ├── templates.py          # Template engine
+│   ├── rules.py              # RuleManager
+│   ├── profiles.py           # Built-in profiles
+│   ├── learner.py           # Pattern learner
+│   └── snapshot.py           # Pre/post snapshots
+├── web_ui/
+│   ├── index.html            # Web UI
+│   └── js/app.js            # Frontend JS
+├── settings.json             # User settings
+├── rules.json                # User rules
+└── requirements.txt
 ```
