@@ -25,7 +25,7 @@ class TemplateEngineTests(unittest.TestCase):
         )
         self.assertEqual(
             out,
-            "2026/02/report.pdf-12345-2026-02-03-application-abcdef123456-7-report.pdf",
+            "2026/02/report.pdf-tiny-2026-02-03-application-abcdef12-007-report.pdf",
         )
 
     def test_single_fallback_literal(self):
@@ -61,7 +61,15 @@ class TemplateEngineTests(unittest.TestCase):
 
     def test_explain_template_returns_preview(self):
         preview = explain_template("{name}.{ext}", {"name": "doc.txt", "ext": ".txt"})
-        self.assertIn('Preview: "doc.txt"', preview)
+        self.assertIn("->", preview)
+        self.assertIn("doc.txt", preview)
+
+    def test_size_counter_hash_defaults(self):
+        file_data = {"name": "file.txt", "ext": "txt", "size_bytes": 1234, "hash": "abcdef1234567890"}
+        self.assertEqual(self.engine.render("{size}", file_data), "tiny")
+        self.assertEqual(self.engine.render("{counter}", file_data), "001")
+        self.assertEqual(self.engine.render("{counter}", file_data, counter=2), "002")
+        self.assertEqual(self.engine.render("{hash}", file_data), "abcdef12")
 
     def test_scanned_file_input(self):
         scanned = ScannedFile(
