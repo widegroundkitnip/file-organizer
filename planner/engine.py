@@ -3,7 +3,7 @@ import uuid
 from typing import List, Dict, Optional
 from dataclasses import dataclass, field, asdict
 from .rules import Rule, RuleManager
-from .templates import apply_template
+from .templates import analyze_template_resolution, explain_template
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +80,13 @@ class PlannedAction:
     rule_id: str = ""
     rule_name: str = ""
     rule_match_reason: str = ""
+    destination_template: str = ""
+    explanation: str = ""
+    template_explanation: str = ""
+    confidence: Optional[str] = None
+    fallback_count: int = 0
+    fallback_vars: List[str] = field(default_factory=list)
+    missing_vars: List[str] = field(default_factory=list)
 
     # Planner-level signals (ARCH-003: signals layer)
     protected: bool = False
@@ -118,6 +125,8 @@ class PlannedAction:
         d = asdict(self)
         # serialize src_identity as nested dict
         d["src_identity"] = asdict(self.src_identity)
+        # Backward-compatibility alias used by the current UI.
+        d["action"] = self.action_type
         return d
 
 
@@ -248,6 +257,23 @@ def _build_match_reason(filter_cond, file: dict) -> str:
     return f"filter:{t}"
 
 
+def _confidence_for_action(file: dict, template_meta: dict) -> str:
+    fallback_count = int(template_meta.get("fallback_count", 0) or 0)
+    unresolved_count = len(template_meta.get("unresolved_vars", []) or [])
+    total_fallbacks = fallback_count + unresolved_count
+
+    missing_mime = file.get("mime_type") is None
+    missing_exif_for_date_rule = bool(template_meta.get("used_date_fields")) and file.get("exif_date_taken") is None
+
+    if missing_mime or missing_exif_for_date_rule:
+        return "low"
+    if total_fallbacks >= 3:
+        return "low"
+    if total_fallbacks >= 1:
+        return "medium"
+    return "high"
+
+
 def plan_from_manifest(
     manifest: dict,
     rules: List[Rule],
@@ -293,6 +319,8 @@ def plan_from_manifest(
                 src=path,
                 plan_id=plan_id,
                 rule_matched="[auto: unknown file]",
+                explanation="Missing trusted metadata. Review manually before any file action.",
+                confidence="low",
                 status="unknown_review",
                 classification=classification,
                 src_identity=SrcIdentity(
@@ -329,12 +357,19 @@ def plan_from_manifest(
 
             # Fan-out: one PlannedAction per destination
             for dest_tpl in dests:
-                dst = apply_template(dest_tpl, file, default_category)
+                template_meta = analyze_template_resolution(dest_tpl, file, default_category)
+                dst = template_meta["rendered"]
                 if not dst.startswith("/"):
                     dst = os.path.join(default_output_dir, dst)
 
                 # CORE-002: MD5 verification for move actions
                 verify_md5 = (rule.action == "move")
+                confidence = _confidence_for_action(file, template_meta)
+                template_explanation = explain_template(dest_tpl, file)
+                explanation = (
+                    f"Matched rule: {rule.name} — template: {dest_tpl}"
+                    if dest_tpl else f"Matched rule: {rule.name}"
+                )
 
                 actions.append(PlannedAction(
                     action_id=str(uuid.uuid4()),
@@ -346,6 +381,13 @@ def plan_from_manifest(
                     rule_id=rule.id,
                     rule_name=rule.name,
                     rule_match_reason=rule_match_reason,
+                    destination_template=dest_tpl,
+                    explanation=explanation,
+                    template_explanation=template_explanation,
+                    confidence=confidence,
+                    fallback_count=template_meta["fallback_count"] + len(template_meta["unresolved_vars"]),
+                    fallback_vars=template_meta["fallback_vars"] + template_meta["unresolved_vars"],
+                    missing_vars=template_meta["missing_vars"],
                     status="pending",
                     conflict_mode=rule.conflict_mode,
                     classification="known",
@@ -371,6 +413,8 @@ def plan_from_manifest(
                     rule_id=rule.id,
                     rule_name=rule.name,
                     rule_match_reason=rule_match_reason,
+                    explanation=f"Matched rule: {rule.name}",
+                    confidence="high",
                     status="pending",
                     conflict_mode=rule.conflict_mode,
                     classification="known",
@@ -395,6 +439,8 @@ def plan_from_manifest(
                 src=path,
                 plan_id=plan_id,
                 rule_matched="[none]",
+                explanation="No enabled rule matched this file, so it will be skipped.",
+                confidence="medium",
                 status="skipped_no_rule",
                 classification="known",
                 src_identity=SrcIdentity(
