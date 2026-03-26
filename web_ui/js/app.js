@@ -1975,6 +1975,26 @@ async function browseForFolder(targetInputId) {
     }
 }
 
+async function browseFolder(targetId) {
+    try {
+        const res = await fetch('/api/browse');
+        const data = await res.json();
+        if (data.ok && data.path) {
+            const target = document.getElementById(targetId);
+            if (target) target.value = data.path;
+            const disp = document.getElementById(targetId + '-display');
+            if (disp) {
+                disp.innerHTML = '<span>📁</span><span>' + data.path + '</span>';
+                disp.classList.remove('path-display-empty');
+                disp.style.color = 'var(--text)';
+                disp.onclick = null;
+            }
+            return;
+        }
+    } catch(e) {}
+    document.getElementById('scan-path-picker').click();
+}
+
 async function asyncBrowseFolderByIndex(idx) {
     await browseForFolder('crosspath-input-' + idx);
 }
@@ -2680,4 +2700,3 @@ navigate = function(page) {
         if (first) first.classList.add("active");
     }
 };
-

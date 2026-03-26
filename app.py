@@ -1204,8 +1204,27 @@ async def api_folder_picker(req: dict):
     """Open native OS folder dialog. Returns selected path or null.
     Uses kdialog on Linux/KDE, or falls back to Python input()."""
     import subprocess, shlex
+    import sys
 
     start_dir = os.path.expanduser(req.get("start_dir", os.path.expanduser("~")))
+
+    # macOS: use osascript
+    if sys.platform == 'darwin':
+        try:
+            alias_result = subprocess.run(
+                ['osascript', '-e', 'choose folder with prompt "Select a folder"'],
+                capture_output=True, text=True, timeout=30
+            )
+            if alias_result.returncode == 0:
+                posix_result = subprocess.run(
+                    ['osascript', '-e', f'POSIX path of "{alias_result.stdout.strip()}"'],
+                    capture_output=True, text=True, timeout=5
+                )
+                if posix_result.returncode == 0:
+                    path = posix_result.stdout.strip().rstrip('/')
+                    return {'ok': True, 'path': path}
+        except Exception:
+            pass
 
     # Try kdialog (KDE) first
     try:
@@ -1235,6 +1254,11 @@ async def api_folder_picker(req: dict):
         pass
 
     return {"ok": False, "path": None, "error": "No native folder picker available (install kdialog or zenity)"}
+
+
+@app.get("/api/browse")
+async def api_browse():
+    return await api_folder_picker({})
 
 
 # ---------------------------------------------------------------------------
