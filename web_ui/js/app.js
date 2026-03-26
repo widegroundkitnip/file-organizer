@@ -533,7 +533,7 @@ function renderResults() {
     </div>
   `;
 
-  // Category breakdown from manifest.files, not legacy category_preview.
+  // Category breakdown from manifest.files.
   const byCategory = {};
   for (const f of files) {
     const cat = f.category || getCategory(f);

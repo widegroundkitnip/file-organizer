@@ -476,20 +476,11 @@ async def api_get_scan(scan_id: str):
             manifest = _manifest_registry[scan_id]
             meta = manifest.get("scan_meta", {})
             return {
-                "id": scan_id,
                 "manifest_id": scan_id,
+                "manifest_path": _scan_progress_state.get("manifest_path", scan_id) or scan_id,
                 "manifest": manifest,
-                "manifest_path": scan_id,
-                "filename": None,
-                "path": meta.get("path", ""),
-                "mode": meta.get("mode", ""),
-                "timestamp": meta.get("timestamp", ""),
                 "total_files": meta.get("total_files", 0),
-                "total_size_bytes": meta.get("total_size_bytes", 0),
-                "scan_roots": meta.get("scan_roots", []),
-                "tier1": manifest.get("tier1", []),
-                "tier2": manifest.get("tier2", []),
-                "tier3": manifest.get("tier3", []),
+                "scan_date": meta.get("scan_date", meta.get("timestamp", "")),
             }
 
     manifest_path = SCANS_DIR / f"{scan_id}.json"
@@ -504,20 +495,11 @@ async def api_get_scan(scan_id: str):
     try:
         meta = manifest.get("scan_meta", {})
         return {
-            "id": scan_id,
             "manifest_path": str(manifest_path) if manifest_path.exists() else scan_id,
             "manifest_id": scan_id,
             "manifest": manifest,
-            "filename": manifest_path.name if manifest_path.exists() else None,
-            "path": meta.get("path", ""),
-            "mode": meta.get("mode", ""),
-            "timestamp": meta.get("timestamp", ""),
             "total_files": meta.get("total_files", 0),
-            "total_size_bytes": meta.get("total_size_bytes", 0),
-            "scan_roots": meta.get("scan_roots", []),
-            "tier1": manifest.get("tier1", []),
-            "tier2": manifest.get("tier2", []),
-            "tier3": manifest.get("tier3", []),
+            "scan_date": meta.get("scan_date", meta.get("timestamp", "")),
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read scan: {e}")
@@ -861,6 +843,14 @@ async def api_duplicate_execute_review(req: DuplicateConsolidateRequest):
         raise HTTPException(status_code=504, detail="Execute timed out (600s)")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Execute error: {e}")
+    finally:
+        try:
+            os.unlink(plan_path)
+        except Exception:
+            pass
+
+    if result.returncode != 0:
+        raise Exception(f"Command failed: {result.stderr}")
 
     # Find the undo log path from output dir
     undo_log_path = ""
