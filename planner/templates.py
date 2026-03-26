@@ -110,6 +110,30 @@ def _mime_category(mime_type: str) -> str:
     return major or ""
 
 
+def _size_category(size_bytes: int) -> str:
+    size = max(0, int(size_bytes or 0))
+    if size < 100 * 1024:
+        return "tiny"
+    if size < 1024 * 1024:
+        return "small"
+    if size < 10 * 1024 * 1024:
+        return "medium"
+    if size < 100 * 1024 * 1024:
+        return "large"
+    return "huge"
+
+
+def _default_counter(counter: int | None) -> str:
+    if counter is None:
+        return "001"
+    try:
+        value = int(counter)
+    except (TypeError, ValueError):
+        text = str(counter).strip()
+        return text or "001"
+    return f"{value:03d}"
+
+
 def _truncate_filename(name: str, max_len: int) -> str:
     if len(name) <= max_len:
         return name
@@ -175,16 +199,17 @@ class TemplateEngine:
 
         size_bytes = file_data.get("size_bytes") or 0
         try:
-            size = str(int(size_bytes))
+            size_as_int = int(size_bytes)
         except (TypeError, ValueError):
-            size = "0"
+            size_as_int = 0
+        size = _size_category(size_as_int)
 
         category_key = str(file_data.get("category") or "other").lower()
         category = CATEGORY_MAP.get(category_key, default_category)
 
-        hash_value = str(file_data.get("hash") or "")
+        hash_value = str(file_data.get("hash") or "")[:8]
         mime_cat = _mime_category(str(file_data.get("mime_type") or ""))
-        counter_value = "1" if counter is None else str(counter)
+        counter_value = _default_counter(counter)
 
         return {
             "name": name,
@@ -203,7 +228,7 @@ class TemplateEngine:
             "day": day,
             "parent": get_parent_name(file_data),
             "tree": get_tree_name(file_data),
-            "size_human": format_size(int(size or 0)),
+            "size_human": format_size(size_as_int),
             "depth": str(file_data.get("depth") or 0),
             "_dt": dt.isoformat() if dt else "",
         }
@@ -310,11 +335,19 @@ def validate_template(template_str: str) -> list[str]:
 
 def explain_template(template_str: str, sample_file: Any) -> str:
     engine = TemplateEngine()
+    file_data = _as_file_dict(sample_file)
+    source = (
+        str(file_data.get("path") or "")
+        or str(file_data.get("relative_path") or "")
+        or str(file_data.get("name") or "")
+        or "<unknown>"
+    )
     preview = engine.render(template_str, sample_file)
     issues = validate_template(template_str)
+    explanation = f'Using template "{template_str}" maps "{source}" -> "{preview}"'
     if issues:
-        return f'Preview: "{preview}" | Notes: ' + "; ".join(issues)
-    return f'Preview: "{preview}"'
+        return explanation + " | Notes: " + "; ".join(issues)
+    return explanation
 
 
 def apply_template(template: str, file: Any, default_category: str = "Other") -> str:
