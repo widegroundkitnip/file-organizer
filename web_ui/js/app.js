@@ -363,10 +363,8 @@ function renderScanHistory() {
 
 async function loadScan(scanId) {
   try {
-    // BUG-022: Use stable backend endpoint to get scan metadata + manifest path
-    const scanMeta = await api('GET', `/api/scans/${scanId}`);
-    state.manifestPath = scanMeta.manifest_path;
-    // Load manifest from the stable path returned by the backend
+    const scanMeta = await api('GET', `/scans/${scanId}`);
+    state.manifestPath = scanMeta.manifest_path || scanMeta.manifest_id || scanId;
     const manifest = await api('GET', `/manifest/${scanId}`);
     state.manifest = manifest;
     navigate('results');
@@ -425,10 +423,10 @@ async function startScan() {
     }, { signal: controller.signal });
     console.log('[scan] /api/scan response', result);
 
-    state.manifestPath = result.manifest_path;
+    state.manifestPath = result.manifest_path || result.manifest_id;
 
-    // Load manifest
-    const manifest = await api('GET', `/manifest/${result.manifest_id}`);
+    const manifestId = result.manifest_id || result.manifest_path;
+    const manifest = await api('GET', `/manifest/${manifestId}`);
     state.manifest = manifest;
 
     if (statusEl) statusEl.textContent = `✓ Found ${result.total_files.toLocaleString()} files`;
