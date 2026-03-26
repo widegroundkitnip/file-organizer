@@ -1,6 +1,7 @@
 /**
  * File Organizer & Deduper — Phase 3 Web UI
  * Vanilla JS, no frameworks, no external imports.
+ * Sprint 16 preview adds confidence, before/after grouping, and move explanation details.
  */
 
 'use strict';
@@ -15,6 +16,9 @@ const state = {
   manifestPath: null,
   rules: [],
   actionPlan: [],
+  previewStats: null,
+  previewReviewed: false,
+  previewScrolledToEnd: false,
   settings: {},
   scans: [],
   scanMode: 'fast',
@@ -29,6 +33,12 @@ window.lastCrossPathData = null;
 // ---------------------------------------------------------------------------
 
 function navigate(page) {
+  if (page === 'execute' && state.actionPlan.length && !canProceedFromPreview()) {
+    state.currentPage = 'preview';
+    showAlert('preview-alert', 'warning', 'Review the preview before proceeding to execute.');
+    updatePreviewProceedButtons();
+    return;
+  }
   state.currentPage = page;
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -133,6 +143,40 @@ function navigate(page) {
 
       el.innerHTML = html;
     }
+  }
+}
+
+function getActionType(action) {
+  return action.action || action.action_type || 'skip';
+}
+
+function canProceedFromPreview() {
+  return state.previewReviewed || state.previewScrolledToEnd;
+}
+
+function setPreviewReviewed(value) {
+  state.previewReviewed = !!value;
+  updatePreviewProceedButtons();
+}
+
+function handlePreviewScrollReview(event) {
+  var target = event && event.target;
+  if (!target || state.previewScrolledToEnd) return;
+  if (target.scrollTop + target.clientHeight >= target.scrollHeight - 12) {
+    state.previewScrolledToEnd = true;
+    updatePreviewProceedButtons();
+  }
+}
+
+function updatePreviewProceedButtons() {
+  var allowed = canProceedFromPreview();
+  var button = document.getElementById('btn-go-execute');
+  if (button) button.disabled = !allowed;
+  var proceed = document.getElementById('btn-preview-proceed');
+  if (proceed) proceed.disabled = !allowed;
+  var review = document.getElementById('btn-mark-reviewed');
+  if (review) {
+    review.textContent = allowed ? 'Reviewed' : 'I reviewed';
   }
 }
 
@@ -673,6 +717,9 @@ async function buildPreview() {
       project_roots: (state.manifest && state.manifest.detected_project_roots) || [],
     });
     state.actionPlan = result.actions || [];
+    state.previewStats = result.stats || null;
+    state.previewReviewed = false;
+    state.previewScrolledToEnd = false;
     renderPreview(result.stats);
     showAlert('preview-alert', 'success',
       `Plan: ${result.stats.moves} moves, ${result.stats.deletes} deletes, ${result.stats.skips} skips`
@@ -776,123 +823,148 @@ function renderDirTreeNode(node, depth, maxDepth, showCounts) {
   return h;
 }
 
-function renderBeforeAfterTree(actions) {
-  // Only show for move actions with a destination
+function dirname(path) {
+  var normalized = String(path || '').replace(/\\/g, '/');
+  var idx = normalized.lastIndexOf('/');
+  if (idx <= 0) return '/';
+  return normalized.slice(0, idx) || '/';
+}
+
+function confidenceBadge(confidence) {
+  var map = {
+    high: { icon: '🟢', label: 'high', bg: 'rgba(34,197,94,0.16)', color: '#4ade80' },
+    medium: { icon: '🟡', label: 'medium', bg: 'rgba(245,158,11,0.16)', color: '#fbbf24' },
+    low: { icon: '🔴', label: 'low', bg: 'rgba(239,68,68,0.16)', color: '#f87171' }
+  };
+  var meta = map[confidence || ''] || { icon: '⚪', label: 'unknown', bg: 'rgba(148,163,184,0.14)', color: '#cbd5e1' };
+  return '<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;background:' + meta.bg + ';color:' + meta.color + ';font-size:11px;font-weight:700;text-transform:uppercase">' + meta.icon + ' ' + meta.label + '</span>';
+}
+
+function buildPreviewSummary(stats) {
+  var actions = state.actionPlan;
+  var moves = stats ? (stats.moves || 0) : actions.filter(function(a) { return getActionType(a) === 'move'; }).length;
+  var deletes = stats ? (stats.deletes || 0) : actions.filter(function(a) { return getActionType(a) === 'delete'; }).length;
+  var skips = stats ? (stats.skips || 0) : actions.filter(function(a) { return getActionType(a) === 'skip'; }).length;
+  var high = actions.filter(function(a) { return a.confidence === 'high'; }).length;
+  var medium = actions.filter(function(a) { return a.confidence === 'medium'; }).length;
+  var low = actions.filter(function(a) { return a.confidence === 'low'; }).length;
+  var risk = { label: 'Safe', color: '#22c55e', bg: 'rgba(34,197,94,0.14)' };
+
+  if (low > 0 || deletes > 5) {
+    risk = { label: 'Review Required', color: '#ef4444', bg: 'rgba(239,68,68,0.14)' };
+  } else if (medium > 0 || (deletes > 0 && deletes <= 5)) {
+    risk = { label: 'Caution', color: '#f59e0b', bg: 'rgba(245,158,11,0.14)' };
+  }
+
+  var reviewHint = canProceedFromPreview()
+    ? 'Review checkpoint satisfied. You can proceed to execute.'
+    : 'Scroll through the preview or click "I reviewed" to enable proceed.';
+
+  return (
+    '<div style="background:' + risk.bg + ';border:1px solid ' + risk.color + ';border-radius:12px;padding:16px 18px;margin-bottom:16px">' +
+      '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px">' +
+        '<div style="font-size:16px;font-weight:700;color:' + risk.color + '">Risk: ' + risk.label + '</div>' +
+        '<div style="font-size:13px;color:var(--text)">' +
+          'Total actions: <strong>' + (stats ? stats.total : actions.length) + '</strong> ' +
+          '· Moves: <strong>' + moves + '</strong> ' +
+          '· Deletes: <strong>' + deletes + '</strong> ' +
+          '· Skips: <strong>' + skips + '</strong>' +
+        '</div>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">' +
+        confidenceBadge('high') + '<span style="font-size:12px;color:var(--muted)">' + high + '</span>' +
+        confidenceBadge('medium') + '<span style="font-size:12px;color:var(--muted)">' + medium + '</span>' +
+        confidenceBadge('low') + '<span style="font-size:12px;color:var(--muted)">' + low + '</span>' +
+      '</div>' +
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+        '<button class="btn btn-secondary" id="btn-mark-reviewed" onclick="setPreviewReviewed(true)">I reviewed</button>' +
+        '<button class="btn btn-accent" id="btn-preview-proceed" onclick="navigate(\'execute\')" disabled>Proceed</button>' +
+        '<span style="font-size:12px;color:var(--muted)">' + reviewHint + '</span>' +
+      '</div>' +
+    '</div>'
+  );
+}
+
+function renderMoveActionRow(item, realIdx) {
+  var actionType = getActionType(item);
+  var defaultChecked = actionType === 'move';
+  var templateLine = item.destination_template
+    ? 'Matched rule: ' + escHtml(item.rule_name || item.rule_matched || 'Unnamed rule') + ' — template: ' + escHtml(item.destination_template)
+    : escHtml(item.explanation || 'Matched rule');
+  var notes = [];
+  if (item.rule_match_reason) notes.push('Rule match: ' + escHtml(item.rule_match_reason));
+  if (item.template_explanation) notes.push(escHtml(item.template_explanation));
+  if (item.fallback_vars && item.fallback_vars.length) notes.push('Fallback/missing fields: ' + escHtml(item.fallback_vars.join(', ')));
+
+  var row = '<div class="action-item" style="align-items:flex-start">';
+  row += '<input type="checkbox" id="action-cb-' + realIdx + '" ' + (defaultChecked ? 'checked' : '') + '>';
+  row += '<div class="action-details">';
+  row += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">' + confidenceBadge(item.confidence) + '<span class="action-badge badge-' + actionType + '">' + escHtml(actionType) + '</span></div>';
+  row += '<div style="font-family:monospace;font-size:13px;line-height:1.5;word-break:break-all;color:var(--text)">📁 ' + escHtml(item.src) + ' → 📁 ' + escHtml(item.dst) + '</div>';
+  row += '<div style="font-size:12px;color:var(--text);margin-top:6px">' + templateLine + '</div>';
+  notes.forEach(function(note) {
+    row += '<div style="font-size:11px;color:var(--muted);margin-top:4px">' + note + '</div>';
+  });
+  row += '</div>';
+  row += '</div>';
+  return row;
+}
+
+function renderMoveGroups(actions) {
+  // before after tree-style grouping by destination folder for preview moves
   var moveActions = actions.filter(function(a) {
-    return a.action === 'move' && a.dst && a.dst.trim();
+    return getActionType(a) === 'move' && a.dst && a.dst.trim();
   });
-  if (moveActions.length === 0) return '';
+  if (!moveActions.length) return '';
 
-  // Extract source dirs and destination dirs
-  var srcDirs = new Set();
-  var dstDirs = new Set();
-  moveActions.forEach(function(a) {
-    var srcParts = a.src.split('/').filter(Boolean);
-    var dstParts = a.dst.split('/').filter(Boolean);
-    if (srcParts.length > 0) srcDirs.add('/' + srcParts.slice(0, -1).join('/'));
-    if (dstParts.length > 0) dstDirs.add('/' + dstParts.slice(0, -1).join('/'));
+  var groups = {};
+  moveActions.forEach(function(item) {
+    var groupPath = dirname(item.dst);
+    if (!groups[groupPath]) groups[groupPath] = [];
+    groups[groupPath].push(item);
   });
 
-  // Build before tree: source directories + files being moved out
-  var beforeSrcs = [];
-  moveActions.forEach(function(a) {
-    var parts = a.src.split('/').filter(Boolean);
-    if (parts.length > 0) beforeSrcs.push(parts[parts.length - 1] + '/ ← moved out');
-  });
-
-  // Collect unique source and destination directory trees
-  var allSrcDirs = [];
-  srcDirs.forEach(function(d) { allSrcDirs.push(d); });
-  var allDstDirs = [];
-  dstDirs.forEach(function(d) { allDstDirs.push(d); });
-
-  // Build simplified before tree from source directories
-  var beforeTree = buildDirTreeFromDirs(allSrcDirs);
-  // Build simplified after tree from destination directories (before state)
-  var afterTree = buildDirTreeFromDirs(allDstDirs);
-
-  // Count files per side
-  var movedCount = moveActions.length;
-  var beforeDirCount = allSrcDirs.length;
-  var afterDirCount = allDstDirs.length;
-
-  var html = '<div style="margin:16px 0 20px 0">';
-  html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">';
-  html += '<span style="font-size:13px;font-weight:bold;color:var(--text)">Tree Preview</span>';
-  html += '<span style="font-size:12px;color:var(--muted);background:rgba(255,255,255,0.06);padding:2px 10px;border-radius:12px">' + movedCount + ' file' + (movedCount !== 1 ? 's' : '') + ' to be moved</span>';
-  html += '</div>';
-
-  html += '<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:start">';
-
-  // LEFT: Before (current structure of affected directories)
-  html += '<div style="background:rgba(239,68,68,0.05);border:1px solid rgba(239,68,68,0.2);border-radius:8px;padding:10px;overflow:hidden">';
-  html += '<div style="font-size:11px;font-weight:bold;color:#ef4444;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.08em">&#8592; Before (current)</div>';
-  html += '<div style="font-size:11px;color:#555;margin-bottom:10px">' + beforeDirCount + ' dir' + (beforeDirCount !== 1 ? 's' : '') + ', ' + movedCount + ' file' + (movedCount !== 1 ? 's' : '') + ' affected</div>';
-  if (Object.keys(beforeTree.subdirs).length > 0) {
-    html += '<div style="max-height:240px;overflow-y:auto">';
-    Object.keys(beforeTree.subdirs).sort().forEach(function(k) {
-      html += renderDirTreeNode(beforeTree.subdirs[k], 0, 4, true);
-    });
+  var groupPaths = Object.keys(groups).sort();
+  var html = '<div style="margin-bottom:16px"><div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:10px">Before → After by Destination</div>';
+  groupPaths.forEach(function(groupPath) {
+    var items = groups[groupPath].sort(function(a, b) { return (a.dst || '').localeCompare(b.dst || ''); });
+    var depth = groupPath.split('/').filter(Boolean).length;
+    var indent = Math.max(0, depth - 1) * 14;
+    html += '<div style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;background:rgba(255,255,255,0.02);margin-bottom:12px;overflow:hidden">';
+    html += '<div style="padding:12px 14px 12px ' + (14 + indent) + 'px;border-bottom:1px solid rgba(255,255,255,0.06);background:rgba(34,197,94,0.08)">';
+    html += '<div style="font-size:12px;color:#86efac;text-transform:uppercase;letter-spacing:0.08em">Destination Folder</div>';
+    html += '<div style="font-family:monospace;font-size:13px;color:var(--text);word-break:break-all">📁 ' + escHtml(groupPath) + '</div>';
+    html += '<div style="font-size:12px;color:var(--muted);margin-top:4px">' + items.length + ' file' + (items.length !== 1 ? 's' : '') + '</div>';
     html += '</div>';
-  } else {
-    html += '<div style="color:#555;font-size:12px;text-align:center;padding:16px 0">No source dirs</div>';
-  }
-  html += '</div>';
-
-  // Arrow divider
-  html += '<div style="display:flex;align-items:center;padding-top:40px">';
-  html += '<span style="font-size:20px;color:var(--accent)">&#10132;</span>';
-  html += '</div>';
-
-  // RIGHT: After (planned structure at destinations)
-  html += '<div style="background:rgba(34,197,94,0.05);border:1px solid rgba(34,197,94,0.2);border-radius:8px;padding:10px;overflow:hidden">';
-  html += '<div style="font-size:11px;font-weight:bold;color:#22c55e;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.08em">After &#8594; (planned)</div>';
-  html += '<div style="font-size:11px;color:#555;margin-bottom:10px">' + afterDirCount + ' dir' + (afterDirCount !== 1 ? 's' : '') + ' to receive files</div>';
-  if (Object.keys(afterTree.subdirs).length > 0) {
-    html += '<div style="max-height:240px;overflow-y:auto">';
-    Object.keys(afterTree.subdirs).sort().forEach(function(k) {
-      html += renderDirTreeNode(afterTree.subdirs[k], 0, 4, true);
+    html += '<div>';
+    items.forEach(function(item) {
+      html += renderMoveActionRow(item, state.actionPlan.indexOf(item));
     });
-    html += '</div>';
-  } else {
-    html += '<div style="color:#555;font-size:12px;text-align:center;padding:16px 0">No destination dirs</div>';
-  }
+    html += '</div></div>';
+  });
   html += '</div>';
-
-  html += '</div></div>';
-
   return html;
 }
 
-/**
- * Build a minimal tree from a list of absolute directory paths.
- * Each path like /Images/2024/03 becomes a tree node.
- */
-function buildDirTreeFromDirs(dirPaths) {
-  var root = { name: '/', path: '/', fileCount: 0, subdirs: {}, _directFiles: 0 };
-
-  dirPaths.forEach(function(dirPath) {
-    var normalized = dirPath.replace(/\\/g, '/').replace(/\\/g, '/');
-    var parts = normalized.split('/').filter(Boolean);
-    if (parts.length === 0) return;
-
-    var current = root;
-    parts.forEach(function(part) {
-      if (!current.subdirs[part]) {
-        var nodePath = '/' + parts.slice(0, parts.indexOf(part) + 1).join('/');
-        current.subdirs[part] = {
-          name: part,
-          path: nodePath,
-          fileCount: 0,
-          subdirs: {},
-          _directFiles: 0,
-        };
-      }
-      current = current.subdirs[part];
-    });
+function renderNonMoveSection(title, color, items) {
+  if (!items.length) return '';
+  var html = '<div style="margin-bottom:16px">';
+  html += '<div style="font-size:14px;font-weight:700;color:' + color + ';margin-bottom:10px">' + escHtml(title) + ' (' + items.length + ')</div>';
+  items.forEach(function(item) {
+    var actionType = getActionType(item);
+    var defaultChecked = actionType === 'delete';
+    html += '<div class="action-item" style="align-items:flex-start">';
+    html += '<input type="checkbox" id="action-cb-' + state.actionPlan.indexOf(item) + '" ' + (defaultChecked ? 'checked' : '') + '>';
+    html += '<div class="action-details">';
+    html += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">' + confidenceBadge(item.confidence) + '<span class="action-badge badge-' + actionType + '">' + escHtml(actionType) + '</span></div>';
+    html += '<div style="font-family:monospace;font-size:13px;line-height:1.5;word-break:break-all;color:var(--text)">📁 ' + escHtml(item.src) + (item.dst ? ' → 📁 ' + escHtml(item.dst) : '') + '</div>';
+    if (item.explanation) html += '<div style="font-size:12px;color:var(--text);margin-top:6px">' + escHtml(item.explanation) + '</div>';
+    if (item.rule_match_reason) html += '<div style="font-size:11px;color:var(--muted);margin-top:4px">Rule match: ' + escHtml(item.rule_match_reason) + '</div>';
+    if (item.error_message) html += '<div style="font-size:11px;color:#fca5a5;margin-top:4px">' + escHtml(item.error_message) + '</div>';
+    html += '</div></div>';
   });
-
-  return root;
+  html += '</div>';
+  return html;
 }
 
 function renderPreview(stats) {
@@ -901,123 +973,34 @@ function renderPreview(stats) {
 
   if (!state.actionPlan.length) {
     container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><div>No preview yet. Click "Build Preview".</div></div>';
+    updatePreviewProceedButtons();
     return;
   }
 
-  // Group actions by category
-  var groups = {
-    organize: { label: "📁 Organize", items: [], color: "var(--accent)" },
-    duplicates: { label: "🔁 Duplicates", items: [], color: "var(--warning)" },
-    skipped: { label: "✓ Skipped", items: [], color: "#22c55e" },
-    blocked: { label: "⛔ Blocked", items: [], color: "var(--error)" },
-    unknown: { label: "⚠ Unknown", items: [], color: "#f59e0b" }
-  };
-  state.actionPlan.forEach(function(a) {
-    // Backend emits: classification, blocked, blocked_reason, action, status
-    if (a.action === "skip" || a.status === "skipped_no_rule") groups.skipped.items.push(a);
-    else if (a.blocked || a.status === "blocked_boundary" || a.status === "blocked") groups.blocked.items.push(a);
-    else if (a.action === "unknown_review" || a.classification === "unknown" || a.classification === "system") groups.unknown.items.push(a);
-    else groups.organize.items.push(a);
-  });
+  state.previewStats = stats || state.previewStats || null;
 
-  // Build action row HTML
-  function buildActionRow(item, realIdx) {
-    var icon = item.action === 'move' ? '→' : item.action === 'delete' ? '🗑' : '—';
-    var badgeClass = 'badge-' + (item.action || 'move');
-    var isDupKeep = item.rule_matched === '_duplicate_resolution' && item.action === 'skip';
-    var isDupDelete = item.rule_matched === '_duplicate_resolution' && item.action === 'delete';
-    var defaultChecked = item.action === 'move' || (item.action === 'delete' && !isDupDelete);
+  var actions = state.actionPlan;
+  var blocked = actions.filter(function(a) { return a.status === 'blocked'; });
+  var review = actions.filter(function(a) { return a.status === 'unknown_review' || a.status === 'conflict_review'; });
+  var deletes = actions.filter(function(a) { return getActionType(a) === 'delete'; });
+  var skips = actions.filter(function(a) { return getActionType(a) === 'skip' && a.status !== 'unknown_review'; });
 
-    var row = '<div class="action-item">';
-    row += '<input type="checkbox" id="action-cb-' + realIdx + '" ' + (isDupKeep ? 'disabled' : '') + ' ' + (defaultChecked ? 'checked' : '') + '>';
-    row += '<span class="action-icon">' + icon + '</span>';
-    row += '<div class="action-details">';
+  var html = '';
+  html += '<div style="background:#f59e0b15;border:1px solid #f59e0b40;border-radius:8px;padding:12px 16px;margin-bottom:14px">';
+  html += '<div style="font-size:15px;font-weight:bold;color:#f59e0b;margin-bottom:6px">&#9888; Preview only — no files will be changed here.</div>';
+  html += '<div style="font-size:13px;color:var(--muted)">Use this layer to verify path changes, matched rules, and confidence before execution.</div>';
+  html += '</div>';
+  html += buildPreviewSummary(state.previewStats);
+  html += '<div id="preview-review-scroll" onscroll="handlePreviewScrollReview(event)" style="max-height:60vh;overflow-y:auto;padding-right:4px">';
+  html += renderMoveGroups(actions);
+  html += renderNonMoveSection('Deletes', '#f87171', deletes);
+  html += renderNonMoveSection('Blocked / Boundary Checks', '#fca5a5', blocked);
+  html += renderNonMoveSection('Manual Review', '#fbbf24', review);
+  html += renderNonMoveSection('Skips', '#94a3b8', skips);
+  html += '</div>';
 
-    // Rule badge + reason per item
-    if (item.rule_name) {
-      var reasonText = item.rule_match_reason ? '<span style="color:#6b7280;font-size:11px;margin-left:6px">via ' + escHtml(item.rule_match_reason) + '</span>' : '';
-      row += '<div style="margin-bottom:4px"><span style="background:rgba(139,92,246,0.2);color:var(--accent);padding:2px 8px;border-radius:12px;font-size:11px;font-weight:bold">' + escHtml(item.rule_name) + '</span>' + reasonText + '</div>';
-    }
-    row += '<div class="action-src"><a href="#" onclick="openFolder(\'' + escHtml(item.src) + '\');return false" style="color:inherit;text-decoration:none;cursor:pointer" title="Open source folder">' + escHtml(item.src) + '</a></div>';
-    if (item.dst && item.action !== 'skip') {
-      row += '<div class="action-arrow">↓</div><div class="action-dst"><a href="#" onclick="openFolder(\'' + escHtml(item.dst) + '\');return false" style="color:inherit;text-decoration:none;cursor:pointer" title="Open destination folder">' + escHtml(item.dst) + '</a></div>';
-    }
-    if (item.rule_match_reason && !item.rule_name) {
-      row += '<div style="color:#555;font-size:11px;margin-top:4px">' + escHtml(item.rule_match_reason) + '</div>';
-    }
-    if (item.blocked_reason) {
-      row += '<div style="color:var(--error);font-size:11px;margin-top:4px">⛔ ' + escHtml(item.blocked_reason) + '</div>';
-    }
-    row += '</div>';
-    row += '<span class="action-badge ' + badgeClass + '">' + (item.action || 'move') + '</span>';
-    row += '</div>';
-    return row;
-  }
-
-  // Collapsible group sections — risky items first (blocked, unknown, skipped),
-  // then routine moves (organize, duplicates). A visual divider separates the two.
-  var groupsHtml = '';
-  var needsReviewOrder = ['blocked', 'unknown', 'skipped'];
-  var routineOrder = ['organize', 'duplicates'];
-
-  needsReviewOrder.concat(routineOrder).forEach(function(gKey, idx) {
-    var g = groups[gKey];
-    if (!g.items.length) return;
-    // Insert a visual divider between the two sections
-    if (idx === needsReviewOrder.length && routineOrder.some(function(rk) { return groups[rk].items.length > 0; })) {
-      groupsHtml += '<div style="border-top:2px solid rgba(255,255,255,0.1);margin:16px 0 12px;padding-top:12px">';
-      groupsHtml += '<div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">&#9654; Routine moves — these are safe and expected</div></div>';
-    }
-    var groupId = 'group-' + gKey;
-    var count = g.items.length;
-    groupsHtml += '<div style="margin-bottom:12px">';
-    groupsHtml += '<div class="filter-chip active" style="background:' + g.color + ';color:white;cursor:pointer;display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;margin-bottom:8px" onclick="toggleGroup(\'' + groupId + '\')">';
-    groupsHtml += '<span style="font-size:14px;font-weight:bold">' + g.label + '</span>';
-    groupsHtml += '<span style="margin-left:auto;font-size:12px;opacity:0.9">' + count + ' item' + (count !== 1 ? 's' : '') + '</span>';
-    groupsHtml += '<span style="font-size:10px;margin-left:4px">▾</span>';
-    groupsHtml += '</div>';
-    groupsHtml += '<div id="' + groupId + '" class="group-items">';
-    g.items.forEach(function(item) {
-      var realIdx = state.actionPlan.indexOf(item);
-      groupsHtml += buildActionRow(item, realIdx);
-    });
-    groupsHtml += '</div></div>';
-  });
-
-  // Stats bar (summary)
-  var total = state.actionPlan.length;
-  // Simulation banner + file counts
-  var protectedCount = state.actionPlan.filter(function(a) {
-    return a.blocked || a.status === 'blocked_boundary' || a.status === 'blocked';
-  }).length;
-  var movesCount = stats ? (stats.moves || 0) : state.actionPlan.filter(function(a) { return a.action === 'move'; }).length;
-  var deletesCount = stats ? (stats.deletes || 0) : state.actionPlan.filter(function(a) { return a.action === 'delete'; }).length;
-
-  var simBanner = '<div style="background:#f59e0b15;border:1px solid #f59e0b40;border-radius:8px;padding:12px 16px;margin-bottom:14px">' +
-    '<div style="font-size:15px;font-weight:bold;color:#f59e0b;margin-bottom:6px">&#9888; This is a simulation &#8212; no files will be changed.</div>' +
-    '<div style="font-size:13px;color:var(--muted)">' +
-    '<span style="color:var(--accent);font-weight:600">' + movesCount + '</span> file' + (movesCount !== 1 ? 's' : '') + ' would be moved' +
-    (deletesCount > 0 ? ',&nbsp;&nbsp;<span style="color:var(--error);font-weight:600">' + deletesCount + '</span> file' + (deletesCount !== 1 ? 's' : '') + ' would be deleted' : '') +
-    (protectedCount > 0 ? ',&nbsp;&nbsp;<span style="color:#f59e0b;font-weight:600">' + protectedCount + '</span> file' + (protectedCount !== 1 ? 's' : '') + ' would be protected' : '') + '.' +
-    '</div></div>';
-
-  var statsHtml = '<div class="stats-grid mb-16">' +
-    '<div class="stat-card"><div class="stat-value">' + (stats ? stats.total : total) + '</div><div class="stat-label">Total</div></div>' +
-    '<div class="stat-card"><div class="stat-value text-primary">' + movesCount + '</div><div class="stat-label">Move</div></div>' +
-    '<div class="stat-card"><div class="stat-value text-error">' + deletesCount + '</div><div class="stat-label">Delete</div></div>' +
-    '<div class="stat-card"><div class="stat-value text-muted">' + (stats ? (stats.skips || 0) : state.actionPlan.filter(function(a){return a.action==='skip';}).length) + '</div><div class="stat-label">Skip</div></div>' +
-    '</div>';
-
-  container.innerHTML = simBanner + statsHtml + renderBeforeAfterTree(state.actionPlan) + groupsHtml;
-
-  // Collapsed by default for large groups
-  ['blocked', 'unknown', 'skipped'].forEach(function(gKey) {
-    var g = groups[gKey];
-    if (g.items.length > 0) {
-      var el = document.getElementById('group-' + gKey);
-      if (el) el.style.display = 'none';
-    }
-  });
+  container.innerHTML = html;
+  updatePreviewProceedButtons();
 }
 
 function toggleGroup(groupId) {
@@ -1029,16 +1012,16 @@ function toggleGroup(groupId) {
 function setPreviewFilter(f) {
   state.filter = f;
   const total = state.actionPlan.length;
-  const moves = state.actionPlan.filter(a => a.action === 'move').length;
-  const deletes = state.actionPlan.filter(a => a.action === 'delete').length;
-  const skips = state.actionPlan.filter(a => a.action === 'skip').length;
+  const moves = state.actionPlan.filter(a => getActionType(a) === 'move').length;
+  const deletes = state.actionPlan.filter(a => getActionType(a) === 'delete').length;
+  const skips = state.actionPlan.filter(a => getActionType(a) === 'skip').length;
   const stats = total ? { total, moves, deletes, skips } : null;
   renderPreview(stats);
 }
 
 function selectAllActions(type) {
   state.actionPlan.forEach((item, i) => {
-    if (item.action === type) {
+    if (getActionType(item) === type) {
       const cb = document.getElementById(`action-cb-${i}`);
       if (cb && !cb.disabled) cb.checked = true;
     }

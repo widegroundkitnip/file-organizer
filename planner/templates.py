@@ -350,6 +350,35 @@ def explain_template(template_str: str, sample_file: Any) -> str:
     return explanation
 
 
+def analyze_template_resolution(template_str: str, file_obj: Any, default_category: str = "Other") -> dict[str, Any]:
+    engine = TemplateEngine()
+    context = engine.build_context(file_obj, default_category=default_category)
+    rendered = engine.render(template_str, file_obj, default_category=default_category)
+
+    missing_vars: list[str] = []
+    fallback_vars: list[str] = []
+    unresolved_vars: list[str] = []
+    for var_name, fallback in _template_tokens(template_str or ""):
+        value = str(context.get(var_name, "") or "")
+        if value:
+            continue
+        missing_vars.append(var_name)
+        if fallback is not None:
+            fallback_vars.append(var_name)
+        else:
+            unresolved_vars.append(var_name)
+
+    return {
+        "rendered": rendered,
+        "missing_vars": missing_vars,
+        "fallback_vars": fallback_vars,
+        "fallback_count": len(fallback_vars),
+        "unresolved_vars": unresolved_vars,
+        "used_date_fields": any(var in {"year", "month", "date", "day"} for var, _ in _template_tokens(template_str or "")),
+        "used_mime_fields": any(var == "mime_cat" for var, _ in _template_tokens(template_str or "")),
+    }
+
+
 def apply_template(template: str, file: Any, default_category: str = "Other") -> str:
     """Backward-compatible helper used by planner.engine."""
     engine = TemplateEngine()
