@@ -7,7 +7,7 @@
 ## Implemented
 
 ### Architecture
-- `organizer.py` — Phase 1 scan engine
+- `legacy/organizer.py` — archived Phase 1 scan engine reference
 - `executor.py` — Phase 2 execution engine
 - `planner/` — Phase 3 rule engine (`engine.py`, `templates.py`, `rules.py`)
 - `scanner/` — Phase 3 cross-path scan engine (`manifest.py`, `duplicate.py`, `structure.py`)
@@ -166,7 +166,8 @@ A local-first, AI-ready file intelligence platform. Not just a deduper — a too
 
 ```
 file_organizer/
-├── organizer.py          # Phase 1 scan engine (done)
+├── legacy/
+│   └── organizer.py      # Archived Phase 1 scan engine reference
 ├── executor.py         # Phase 2 execution engine (done)
 ├── planner.py          # Phase 3 rule engine
 ├── app.py              # FastAPI web app

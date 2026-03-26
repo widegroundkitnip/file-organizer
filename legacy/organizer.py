@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
-# DEPRECATED: This module is kept as a CLI reference only.
-# It is NOT called by app.py. The canonical scanner is scanner/manifest.py.
-# Key utilities migrated:
-#   - find_empty_folders() / find_hidden_folders() — imported by app.py
-#   - HashCache — see scanner/cache.py (TBD)
-#   - ALWAYS_EXCLUDED — see scanner/utils.py (TBD)
+# DEPRECATED — scanner/manifest.py is the canonical scanner.
+# This file is kept for reference only and is NOT called by any backend route.
+# It is the old CLI implementation and will be removed in a future version.
 """
 File Organizer & Deduper CLI — Phase 1: Scan Engine
 Phase 1.5 improvements:

@@ -4,7 +4,7 @@ app.py — Phase 3: FastAPI Web App
 File Organizer & Deduper
 
 Serves the web UI and provides API endpoints for:
-- Scanning directories (wraps organizer.py)
+- Scanning directories (uses scanner/manifest.py)
 - Browsing manifests
 - Managing rules + settings
 - Generating previews (via planner.py)
@@ -436,7 +436,7 @@ async def api_get_manifest(manifest_id: str):
     with _registry_lock:
         if manifest_id in _manifest_registry:
             return _manifest_registry[manifest_id]
-    # 2. Fall back to disk (old organizer.py-produced scans)
+    # 2. Fall back to disk (older archived scan manifests)
     manifest_path = SCANS_DIR / f"{manifest_id}.json"
     if not manifest_path.exists():
         raise HTTPException(status_code=404, detail=f"Manifest not found: {manifest_id}")
@@ -462,7 +462,7 @@ async def api_list_scans():
                 "total_size_bytes": meta.get("total_size_bytes", 0),
                 "in_memory": True,
             })
-    # 2. Disk-based scans (old organizer.py-produced manifests)
+    # 2. Disk-based scans (older archived manifests)
     for p in sorted(SCANS_DIR.glob("scan_*.json"), reverse=True):
         try:
             with open(p, "r", encoding="utf-8") as f:

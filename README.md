@@ -234,7 +234,8 @@ Local deterministic pattern aggregator — no cloud, no API calls.
 file-organizer/
 ├── app.py                    # FastAPI web app (port 3001)
 ├── executor.py               # Execution engine
-├── organizer.py             # ⚠️ Deprecated — CLI reference only
+├── legacy/
+│   └── organizer.py         # ⚠️ Deprecated — archived CLI reference only
 ├── scanner/
 │   ├── manifest.py          # Canonical scan engine
 │   ├── project_detect.py     # Project root detection
