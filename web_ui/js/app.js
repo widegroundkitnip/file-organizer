@@ -803,20 +803,6 @@ async function buildPreview() {
     return;
   }
   if (!state.manifestPath) {
-    // Try to get it from scan meta + settings
-    settings = await api('GET', '/settings').catch(() => settings);
-    const scanDir = settings.scan_output_dir || '';
-    const meta = state.manifest.scan_meta || {};
-    const ts = (meta.timestamp || '').replace('T','_').replace(/:/g,'').substring(0,15);
-    if (scanDir) {
-      // Find the scan id from scans list
-      if (state.scans.length) {
-        state.manifestPath = `${scanDir}/${state.scans[0].id}.json`;
-      }
-    }
-  }
-
-  if (!state.manifestPath) {
     showAlert('preview-alert', 'error', 'Cannot determine manifest path. Re-run the scan.');
     return;
   }
