@@ -12,14 +12,14 @@ from .templates import apply_template
 # Three-layer model:
 #   Signals  — what the scanner detects (project roots, protected paths, conflicts)
 #   Rules    — user-defined filters and templates
-#   Actions  — concrete operations (move | copy | delete | skip | merge)
+#   Actions  — concrete operations (move | copy | delete | skip)
 #
 # Preview shows statuses: protected | blocked | unknown_review | conflict_review
-# Executor receives ONLY:     move | copy | delete | skip | merge
+# Executor receives ONLY:     move | copy | delete | skip
 # ---------------------------------------------------------------------------
 
 # Planner action types — the ONLY values that reach the executor (ARCH-001/003)
-PLANNER_ACTION_TYPES = frozenset({"move", "copy", "delete", "skip", "merge"})
+PLANNER_ACTION_TYPES = frozenset({"move", "copy", "delete", "skip"})
 
 # Planner status values — cover all planner-level outcomes including
 # review statuses that never reach the executor
@@ -55,10 +55,10 @@ class PlannedAction:
     ARCH-003 / EXEC-001: Planner's output — intent to act.
 
     This is what the planner produces; the executor receives a normalised
-    subset (move/copy/delete/skip/merge only).
+    subset (move/copy/delete/skip only).
 
     Fields:
-      action_type  — concrete operation: move | copy | delete | skip | merge
+      action_type  — concrete operation: move | copy | delete | skip
                     NOTE: "protected", "blocked", "unknown_review",
                     "conflict_review" are STATUS values, NOT action types.
       src / dst   — source path, destination path
@@ -70,7 +70,7 @@ class PlannedAction:
       error_message / warning_message — EXEC-002: human-readable detail
     """
     # Intent
-    action_type: str = "skip"   # move | copy | delete | skip | merge
+    action_type: str = "skip"   # move | copy | delete | skip
     src: str = ""
     dst: str = ""
     plan_id: str = ""
@@ -262,10 +262,10 @@ def plan_from_manifest(
 
     Signals  — what the scanner detects: project roots, protected paths, conflicts
     Rules     — user-defined filters and templates
-    Actions   — concrete operations: move | copy | delete | skip | merge
+    Actions   — concrete operations: move | copy | delete | skip
 
     Preview shows statuses: protected | blocked | unknown_review | conflict_review
-    Executor receives ONLY:   move | copy | delete | skip | merge
+    Executor receives ONLY:   move | copy | delete | skip
 
     Key rules enforced:
     1. Unknown/system files → status=unknown_review (never auto-moved/deleted)
@@ -314,6 +314,11 @@ def plan_from_manifest(
                 continue
 
             rule_match_reason = _build_match_reason(rule.filter, file)
+            if rule.action not in PLANNER_ACTION_TYPES:
+                raise ValueError(
+                    f"Unsupported planner action {rule.action!r} in rule {rule.name!r}. "
+                    f"Allowed actions: {', '.join(sorted(PLANNER_ACTION_TYPES))}"
+                )
 
             if rule.destinations:
                 dests = rule.destinations
@@ -433,7 +438,6 @@ def plan_from_manifest(
         "deletes": sum(1 for a in actions if a.action_type == "delete"),
         "skips": sum(1 for a in actions if a.action_type == "skip"),
         "copies": sum(1 for a in actions if a.action_type == "copy"),
-        "merges": sum(1 for a in actions if a.action_type == "merge"),
         # Planner statuses (what the preview shows as badges)
         "unknown_review": sum(1 for a in actions if a.status == "unknown_review"),
         "protected": sum(1 for a in actions if a.status == "protected"),

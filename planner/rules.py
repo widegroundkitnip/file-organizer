@@ -77,9 +77,9 @@ class Rule:
     destinations: List[str] = field(default_factory=list)
     conflict_mode: str = "rename"  # rename | skip | overwrite
     # ARCH-003: Rule action — planner action types (executor receives these)
-    # Valid: move | copy | delete | skip | merge
+    # Valid: move | copy | delete | skip
     # NOTE: protected / blocked / unknown_review / conflict_review are STATUS values, NOT actions
-    action: str = "move"  # move | copy | delete | skip | merge
+    action: str = "move"  # move | copy | delete | skip
     tags: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
