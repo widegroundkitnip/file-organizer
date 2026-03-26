@@ -489,6 +489,13 @@ async function stopScan() {
     console.warn('[scan] cancel request failed:', e.message);
   } finally {
     controller.abort();
+    state.scanAbortController = null;
+    state.scanCancelRequested = false;
+    if (stopBtn) {
+      stopBtn.classList.add('hidden');
+      stopBtn.disabled = false;
+      stopBtn.textContent = '⏹ Stop Scan';
+    }
   }
 }
 
