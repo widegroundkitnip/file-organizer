@@ -24,6 +24,9 @@ const state = {
   scanMode: 'fast',
   filter: 'all',
   selectedProfile: 'generic',
+  scanPath: '',
+  scanAbortController: null,
+  scanCancelRequested: false,
 };
 
 window.lastCrossPathData = null;
@@ -184,12 +187,13 @@ function updatePreviewProceedButtons() {
 // API wrapper
 // ---------------------------------------------------------------------------
 
-async function api(method, endpoint, body) {
+async function api(method, endpoint, body, options = {}) {
   const opts = {
     method,
     headers: { 'Content-Type': 'application/json' },
   };
   if (body !== undefined) opts.body = JSON.stringify(body);
+  if (options.signal) opts.signal = options.signal;
   const res = await fetch(`/api${endpoint}`, opts);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -296,6 +300,10 @@ function renderPathDisplay(targetId, path) {
 
 function setSelectedPath(targetId, path) {
   const cleanPath = (path || '').trim();
+  if (targetId === 'scan-path') {
+    state.scanPath = cleanPath;
+    console.log('[scan] setSelectedPath(scan-path)', cleanPath);
+  }
   const target = document.getElementById(targetId);
   if (target && 'value' in target) {
     target.value = cleanPath;
@@ -305,6 +313,9 @@ function setSelectedPath(targetId, path) {
 }
 
 function getSelectedPath(targetId) {
+  if (targetId === 'scan-path' && state.scanPath) {
+    return state.scanPath.trim();
+  }
   const target = document.getElementById(targetId);
   if (target && 'value' in target) {
     const value = target.value.trim();
@@ -366,26 +377,53 @@ async function loadScan(scanId) {
 
 async function startScan() {
   const path = getSelectedPath('scan-path');
+  console.log('[scan] startScan path resolution', {
+    statePath: state.scanPath,
+    inputValue: document.getElementById('scan-path')?.value || '',
+    displayPath: document.getElementById('scan-path-display')?.dataset?.path || '',
+    resolvedPath: path,
+  });
   if (!path) {
     showAlert('scan-alert', 'warning', 'Enter a folder path to scan.');
     return;
   }
 
+  if (state.scanAbortController) {
+    console.warn('[scan] startScan ignored because a scan is already active');
+    return;
+  }
+
   const btn = document.getElementById('btn-scan');
+  const stopBtn = document.getElementById('btn-stop-scan');
   const progress = document.getElementById('scan-progress');
   const statusEl = document.getElementById('scan-status');
+  const controller = new AbortController();
+
+  state.scanAbortController = controller;
+  state.scanCancelRequested = false;
 
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Scanning…';
+  if (stopBtn) {
+    stopBtn.classList.remove('hidden');
+    stopBtn.disabled = false;
+    stopBtn.textContent = '⏹ Stop Scan';
+  }
   if (progress) progress.classList.remove('hidden');
   if (statusEl) statusEl.textContent = 'Scanning…';
 
   try {
-    const result = await api('POST', '/scan', {
+    console.log('[scan] POST /api/scan payload', {
       path,
       mode: state.scanMode,
       include_hidden: document.getElementById('include-hidden')?.checked || false,
     });
+    const result = await api('POST', '/scan', {
+      path,
+      mode: state.scanMode,
+      include_hidden: document.getElementById('include-hidden')?.checked || false,
+    }, { signal: controller.signal });
+    console.log('[scan] /api/scan response', result);
 
     state.manifestPath = result.manifest_path;
 
@@ -399,11 +437,48 @@ async function startScan() {
     await loadScans();
     navigate('results');
   } catch(e) {
-    showAlert('scan-alert', 'error', `Scan failed: ${e.message}`);
+    if (e && (e.name === 'AbortError' || state.scanCancelRequested)) {
+      console.log('[scan] scan cancelled', e.message || e.name);
+      showAlert('scan-alert', 'warning', 'Scan cancelled.');
+      if (statusEl) statusEl.textContent = 'Scan cancelled.';
+    } else {
+      showAlert('scan-alert', 'error', `Scan failed: ${e.message}`);
+    }
   } finally {
+    state.scanAbortController = null;
+    state.scanCancelRequested = false;
     btn.disabled = false;
     btn.innerHTML = '🔍 Start Scan';
+    if (stopBtn) {
+      stopBtn.classList.add('hidden');
+      stopBtn.disabled = false;
+      stopBtn.textContent = '⏹ Stop Scan';
+    }
     if (progress) progress.classList.add('hidden');
+  }
+}
+
+async function stopScan() {
+  const controller = state.scanAbortController;
+  if (!controller) {
+    return;
+  }
+
+  const stopBtn = document.getElementById('btn-stop-scan');
+  state.scanCancelRequested = true;
+  console.log('[scan] stopScan requested');
+
+  if (stopBtn) {
+    stopBtn.disabled = true;
+    stopBtn.textContent = 'Stopping…';
+  }
+
+  try {
+    await api('POST', '/scan/cancel');
+  } catch (e) {
+    console.warn('[scan] cancel request failed:', e.message);
+  } finally {
+    controller.abort();
   }
 }
 
@@ -2004,6 +2079,7 @@ async function browseFolder(targetId) {
         const res = await fetch('/api/browse');
         const data = await res.json();
         if (data.ok && data.path) {
+            console.log('[scan] browseFolder resolved path', { targetId, path: data.path });
             setSelectedPath(targetId, data.path);
             return;
         }
@@ -2059,6 +2135,13 @@ function handleBrowseFolder(input, targetId) {
     input.value = '';
 
     // Apply to target
+    console.log('[scan] handleBrowseFolder selection', {
+        targetId: targetId,
+        resolvedPath: resolvedPath,
+        fullPath: fullPath,
+        relativePath: files[0].webkitRelativePath || '',
+    });
+
     if (target.tagName === 'INPUT') {
         setSelectedPath(targetId, resolvedPath);
     } else {
