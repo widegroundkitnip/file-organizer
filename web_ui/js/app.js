@@ -34,6 +34,7 @@ const state = {
 };
 
 window.lastCrossPathData = null;
+let crosspathPollCount = 0;
 
 // ---------------------------------------------------------------------------
 // Navigation
@@ -60,6 +61,11 @@ function navigate(page) {
   if (page === 'preview' && state.manifest)  renderPreview();
   if (page === 'execute')                    renderExecution();
   if (page === 'settings')                   renderSettings();
+  if (page === "help") {
+    showHelpSection("scan");
+    var first = document.querySelector(".help-toc-item");
+    if (first) first.classList.add("active");
+  }
   if (page === "structure") { renderStructureTree(window.lastCrossPathData); }
   if (page === "unknown") {
     const data = window.lastCrossPathData;
@@ -560,9 +566,9 @@ async function stopScan() {
     console.warn('[scan] cancel request failed:', e.message);
   } finally {
     clearScanPollInterval();
-    controller.abort();
     state.scanAbortController = null;
     state.scanCancelRequested = false;
+    controller.abort();
     const btn = document.getElementById('btn-scan');
     const stopBtn = document.getElementById('btn-stop-scan');
     if (btn) { btn.disabled = false; btn.innerHTML = '🔍 Start Scan'; }
@@ -1241,17 +1247,41 @@ function renderExecution() {
   const container = document.getElementById('execute-content');
   if (!container) return;
 
-  const selected = getSelectedActions();
-  const outputDir = document.getElementById('exec-output-dir')?.value || '/tmp/file-organizer-output';
+  const total = state.actionPlan.length;
 
-  if (!selected.length && !state.actionPlan.length) {
+  if (!total) {
     container.innerHTML = `
       <div class="empty-state">
         <div class="empty-state-icon">⚙️</div>
         <div>Build a preview first, then come here to execute.</div>
       </div>`;
+    updateExecuteButtonState();
     return;
   }
+
+  const selectionMap = state.actionPlan.map((item, idx) => {
+    const cb = document.getElementById(`action-cb-${idx}`);
+    return cb ? cb.checked : getActionType(item) !== 'skip';
+  });
+  const selectedCount = selectionMap.filter(Boolean).length;
+
+  const rows = state.actionPlan.map((item, idx) => renderExecutionActionRow(item, idx, selectionMap[idx])).join('');
+
+  container.innerHTML = `
+    <div style="background:rgba(59,130,246,0.10);border:1px solid rgba(59,130,246,0.35);border-radius:12px;padding:14px 16px;margin-bottom:14px">
+      <div style="font-size:15px;font-weight:700;color:#60a5fa;margin-bottom:6px">Execution queue</div>
+      <div style="font-size:13px;color:var(--text)">Selected <strong>${selectedCount}</strong> of <strong>${total}</strong> planned action(s).</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      <button class="btn btn-secondary" type="button" onclick="selectAllActions('move'); updateExecuteButtonState();">Select moves</button>
+      <button class="btn btn-secondary" type="button" onclick="selectAllActions('delete'); updateExecuteButtonState();">Select deletes</button>
+      <button class="btn btn-secondary" type="button" onclick="selectAllActions('skip'); updateExecuteButtonState();">Select skips</button>
+      <button class="btn btn-secondary" type="button" onclick="deselectAll(); updateExecuteButtonState();">Clear all</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">${rows}</div>
+  `;
+
+  updateExecuteButtonState();
 }
 
 function updateExecuteBanners() {
@@ -1260,6 +1290,40 @@ function updateExecuteBanners() {
   const warningBanner = document.getElementById('execute-warning-banner');
   if (banner) banner.style.display = dryRun ? 'block' : 'none';
   if (warningBanner) warningBanner.style.display = dryRun ? 'none' : 'block';
+}
+
+function updateExecuteButtonState() {
+  const btn = document.getElementById('btn-execute');
+  if (!btn) return;
+  const selectedCount = getSelectedActions().length;
+  btn.disabled = selectedCount === 0;
+  btn.innerHTML = selectedCount > 0
+    ? `⚡ Run for real (${selectedCount})`
+    : '⚡ Run for real';
+}
+
+function renderExecutionActionRow(item, realIdx, checked) {
+  const actionType = getActionType(item);
+  const notes = [];
+  if (item.explanation) notes.push(escHtml(item.explanation));
+  if (item.rule_match_reason) notes.push('Rule match: ' + escHtml(item.rule_match_reason));
+  if (item.template_explanation) notes.push(escHtml(item.template_explanation));
+  if (item.error_message) notes.push('<span style="color:#fca5a5">' + escHtml(item.error_message) + '</span>');
+
+  let row = '<div class="action-item" style="align-items:flex-start">';
+  row += '<input type="checkbox" id="action-cb-' + realIdx + '" ' + (checked ? 'checked' : '') + ' onchange="updateExecuteButtonState()">';
+  row += '<div class="action-details">';
+  row += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">' + confidenceBadge(item.confidence) + '<span class="action-badge badge-' + actionType + '">' + escHtml(actionType) + '</span></div>';
+  row += '<div style="font-family:monospace;font-size:13px;line-height:1.5;word-break:break-all;color:var(--text)">📁 ' + escHtml(item.src) + (item.dst ? ' → 📁 ' + escHtml(item.dst) : '') + '</div>';
+  if (notes.length) {
+    row += '<div style="font-size:12px;color:var(--muted);margin-top:6px;display:flex;flex-direction:column;gap:4px">';
+    notes.forEach(function(note) {
+      row += '<div>' + note + '</div>';
+    });
+    row += '</div>';
+  }
+  row += '</div></div>';
+  return row;
 }
 
 async function executePlan() {
@@ -1308,15 +1372,15 @@ async function executePlan() {
     });
 
     // UX-005: human-readable post-run summary
-    const moved = result.moved || result.completed || 0;
-    const deleted = result.deleted || 0;
-    const skipped = result.skipped || 0;
+    const completed = result.completed || 0;
+    const failed = result.failed || 0;
+    const alreadyDone = result.already_done || 0;
     const protected_ = result.protected || 0;
     const dryLabel = dryRun ? 'Dry run complete — no files were changed.' : '';
     const summaryParts = [];
-    if (moved > 0)  summaryParts.push(`${moved} file${moved !== 1 ? 's' : ''} moved`);
-    if (deleted > 0) summaryParts.push(`${deleted} file${deleted !== 1 ? 's' : ''} deleted`);
-    if (skipped > 0) summaryParts.push(`${skipped} skipped`);
+    if (completed > 0)  summaryParts.push(`${completed} file${completed !== 1 ? 's' : ''} completed`);
+    if (failed > 0) summaryParts.push(`${failed} file${failed !== 1 ? 's' : ''} failed`);
+    if (alreadyDone > 0) summaryParts.push(`${alreadyDone} already done`);
     if (protected_ > 0) summaryParts.push(`${protected_} protected`);
     const summary = summaryParts.length
       ? summaryParts.join(', ') + '.'
@@ -2906,21 +2970,11 @@ var helpSections = {
 </ul>`
 };
 
-function showHelpSection(id) {
+function showHelpSection(id, evt) {
     var content = document.getElementById("help-content");
     if (!content) return;
     content.innerHTML = helpSections[id] || "<p>Coming soon.</p>";
     document.querySelectorAll(".help-toc-item").forEach(function(el) { el.classList.remove("active"); });
-    if (event && event.target) event.target.classList.add("active");
+    var activeEvent = evt || window.event;
+    if (activeEvent && activeEvent.target) activeEvent.target.classList.add("active");
 }
-
-// Patch navigate to init help page
-var _orig_navigate = navigate;
-navigate = function(page) {
-    _orig_navigate(page);
-    if (page === "help") {
-        showHelpSection("scan");
-        var first = document.querySelector(".help-toc-item");
-        if (first) first.classList.add("active");
-    }
-};
