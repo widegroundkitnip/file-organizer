@@ -14,6 +14,9 @@ const state = {
   currentPage: 'scan',
   manifest: null,
   manifestPath: null,
+  tier1: [],
+  tier2: [],
+  tier3: [],
   rules: [],
   actionPlan: [],
   previewStats: null,
@@ -220,20 +223,22 @@ function fmtDate(iso) {
 }
 
 function categoryClass(cat) {
+  const key = String(cat || 'Other').toLowerCase();
   const map = {
-    Images: 'cat-images', Video: 'cat-videos', Audio: 'cat-audio',
-    Documents: 'cat-documents', Code: 'cat-code', Archives: 'cat-archives',
-    Other: 'cat-other',
+    images: 'cat-images', video: 'cat-videos', audio: 'cat-audio',
+    documents: 'cat-documents', code: 'cat-code', archives: 'cat-archives',
+    other: 'cat-other',
   };
-  return map[cat] || 'cat-other';
+  return map[key] || 'cat-other';
 }
 
 function categoryEmoji(cat) {
+  const key = String(cat || 'Other').toLowerCase();
   const map = {
-    Images: '🖼', Video: '🎬', Audio: '🎵', Documents: '📄',
-    Code: '💻', Archives: '📦', Other: '📁',
+    images: '🖼', video: '🎬', audio: '🎵', documents: '📄',
+    code: '💻', archives: '📦', other: '📁',
   };
-  return map[cat] || '📁';
+  return map[key] || '📁';
 }
 
 function getCategory(file) {
@@ -364,9 +369,13 @@ function renderScanHistory() {
 async function loadScan(scanId) {
   try {
     const scanMeta = await api('GET', `/scans/${scanId}`);
-    state.manifestPath = scanMeta.manifest_path || scanMeta.manifest_id || scanId;
-    const manifest = await api('GET', `/manifest/${scanId}`);
+    state.manifestPath = scanMeta.manifest_id || scanMeta.manifest_path || scanId;
+    const manifestId = scanMeta.manifest_id || scanMeta.manifest_path || scanId;
+    const manifest = scanMeta.manifest || await api('GET', `/manifest/${manifestId}`);
     state.manifest = manifest;
+    state.tier1 = scanMeta.tier1 || manifest.tier1 || [];
+    state.tier2 = scanMeta.tier2 || manifest.tier2 || [];
+    state.tier3 = scanMeta.tier3 || manifest.tier3 || [];
     navigate('results');
   } catch(e) {
     showAlert('scan-alert', 'error', `Failed to load scan: ${e.message}`);
@@ -423,11 +432,14 @@ async function startScan() {
     }, { signal: controller.signal });
     console.log('[scan] /api/scan response', result);
 
-    state.manifestPath = result.manifest_path || result.manifest_id;
+    state.manifestPath = result.manifest_id || result.manifest_path;
 
     const manifestId = result.manifest_id || result.manifest_path;
     const manifest = await api('GET', `/manifest/${manifestId}`);
     state.manifest = manifest;
+    state.tier1 = result.tier1 || manifest.tier1 || [];
+    state.tier2 = result.tier2 || manifest.tier2 || [];
+    state.tier3 = result.tier3 || manifest.tier3 || [];
 
     if (statusEl) statusEl.textContent = `✓ Found ${result.total_files.toLocaleString()} files`;
     showAlert('scan-alert', 'success', `Scan complete — ${result.total_files.toLocaleString()} files found.`);
@@ -494,8 +506,10 @@ function renderResults() {
 
   const meta = m.scan_meta || {};
   const files = m.files || [];
-  const dupGroups = m.duplicate_groups || [];
-  const catPreview = m.category_preview || {};
+  const tier1 = state.tier1.length ? state.tier1 : (m.tier1 || []);
+  const tier2 = state.tier2.length ? state.tier2 : (m.tier2 || []);
+  const tier3 = state.tier3.length ? state.tier3 : (m.tier3 || []);
+  const dupGroups = tier1.concat(tier2, tier3);
 
   // Stats
   const statsHtml = `
@@ -513,20 +527,31 @@ function renderResults() {
         <div class="stat-label">Duplicate Groups</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value">${Object.keys(catPreview).length}</div>
+        <div class="stat-value">${Object.keys(meta.by_category || {}).length}</div>
         <div class="stat-label">Categories</div>
       </div>
     </div>
   `;
 
-  // Category breakdown
-  // Group files by category
+  // Category breakdown from manifest.files, not legacy category_preview.
   const byCategory = {};
   for (const f of files) {
-    const cat = getCategory(f);
+    const cat = f.category || getCategory(f);
     if (!byCategory[cat]) byCategory[cat] = [];
     byCategory[cat].push(f);
   }
+
+  const categorySummaryHtml = Object.entries(byCategory)
+    .sort((a,b) => b[1].length - a[1].length)
+    .map(([cat, catFiles]) => `
+      <div style="display:flex;justify-content:space-between;gap:12px;padding:4px 0;border-bottom:1px solid #222">
+        <span>
+          <span>${categoryEmoji(cat)}</span>
+          <span class="category-tag ${categoryClass(cat)}" style="margin-left:6px">${escHtml(cat)}</span>
+        </span>
+        <span class="text-muted text-sm">${catFiles.length.toLocaleString()} files</span>
+      </div>
+    `).join('');
 
   const catHtml = Object.entries(byCategory)
     .sort((a,b) => b[1].length - a[1].length)
@@ -563,10 +588,10 @@ function renderResults() {
               <span class="dup-tier ${g.tier}">${g.tier}</span>
               <span class="text-muted text-sm">${g.files.length} files in group</span>
             </div>
-            ${g.files.map((fp, fi) => `
+            ${g.files.map((file, fi) => `
               <div class="dup-file ${fi === 0 ? 'keep' : ''}">
                 <span>${fi === 0 ? '✓ keep' : '✗ dup'}</span>
-                <span class="dup-file-path">${escHtml(fp)}</span>
+                <span class="dup-file-path">${escHtml(file.path || file)}</span>
               </div>
             `).join('')}
           </div>
@@ -600,6 +625,16 @@ function renderResults() {
         }).join('')}
       </div>`;
   }
+
+  const metaHtml = `
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title">ℹ Scan Summary</div>
+      <div class="text-muted text-sm" style="margin-bottom:8px">
+        ${meta.timestamp ? `Scanned ${escHtml(fmtDate(meta.timestamp))}` : 'Scan metadata available'}
+      </div>
+      ${categorySummaryHtml || '<div class="text-muted text-sm">No categorized files in this manifest.</div>'}
+    </div>
+  ` + (projHtml || '');
 
   document.getElementById('results-content').innerHTML =
     statsHtml + metaHtml +

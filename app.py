@@ -282,6 +282,9 @@ async def api_scan(req: ScanRequest):
             tier1 = dupes.get("tier1", [])
             tier2 = dupes.get("tier2", [])
             tier3 = dupes.get("tier3") or []
+            manifest["tier1"] = tier1
+            manifest["tier2"] = tier2
+            manifest["tier3"] = tier3
 
             analyzer = StructureAnalyzer(manifest, [path])
             structure = analyzer.analyze()
@@ -305,7 +308,7 @@ async def api_scan(req: ScanRequest):
 
             return {
                 "status": "ok",
-                "manifest_path": str(manifest_path),
+                "manifest_path": manifest_id,
                 "manifest_id": manifest_id,
                 "total_files": total_files,
                 "manifest": manifest,
@@ -449,24 +452,43 @@ async def api_list_scans():
 @app.get("/api/scans/{scan_id}")
 async def api_get_scan(scan_id: str):
     """Return scan metadata including the manifest path for a given scan id."""
+    with _registry_lock:
+        if scan_id in _manifest_registry:
+            manifest = _manifest_registry[scan_id]
+            meta = manifest.get("scan_meta", {})
+            return {
+                "id": scan_id,
+                "manifest_id": scan_id,
+                "manifest": manifest,
+                "manifest_path": scan_id,
+                "filename": None,
+                "path": meta.get("path", ""),
+                "mode": meta.get("mode", ""),
+                "timestamp": meta.get("timestamp", ""),
+                "total_files": meta.get("total_files", 0),
+                "total_size_bytes": meta.get("total_size_bytes", 0),
+                "scan_roots": meta.get("scan_roots", []),
+                "tier1": manifest.get("tier1", []),
+                "tier2": manifest.get("tier2", []),
+                "tier3": manifest.get("tier3", []),
+            }
+
     manifest_path = SCANS_DIR / f"{scan_id}.json"
     if not manifest_path.exists():
-        with _registry_lock:
-            manifest = _manifest_registry.get(scan_id)
-        if manifest is None:
-            raise HTTPException(status_code=404, detail=f"Scan not found: {scan_id}")
-    else:
-        try:
-            with open(manifest_path, "r", encoding="utf-8") as f:
-                manifest = json.load(f)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to read scan: {e}")
+        raise HTTPException(status_code=404, detail=f"Scan not found: {scan_id}")
+
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read scan: {e}")
     try:
         meta = manifest.get("scan_meta", {})
         return {
             "id": scan_id,
             "manifest_path": str(manifest_path) if manifest_path.exists() else scan_id,
             "manifest_id": scan_id,
+            "manifest": manifest,
             "filename": manifest_path.name if manifest_path.exists() else None,
             "path": meta.get("path", ""),
             "mode": meta.get("mode", ""),
@@ -474,6 +496,9 @@ async def api_get_scan(scan_id: str):
             "total_files": meta.get("total_files", 0),
             "total_size_bytes": meta.get("total_size_bytes", 0),
             "scan_roots": meta.get("scan_roots", []),
+            "tier1": manifest.get("tier1", []),
+            "tier2": manifest.get("tier2", []),
+            "tier3": manifest.get("tier3", []),
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read scan: {e}")
@@ -1015,8 +1040,17 @@ async def api_generate_rules(profile_id: str):
 @app.post("/api/preview")
 async def api_preview(req: PreviewRequest):
     """Generate action plan from manifest + rules via planner.plan_from_manifest()."""
-    if not os.path.exists(req.manifest_path):
-        raise HTTPException(status_code=404, detail=f"Manifest not found: {req.manifest_path}")
+    manifest_ref = req.manifest_path
+
+    with _registry_lock:
+        in_memory_manifest = _manifest_registry.get(manifest_ref)
+
+    if in_memory_manifest is None and not os.path.exists(manifest_ref):
+        manifest_candidate = SCANS_DIR / f"{manifest_ref}.json"
+        if manifest_candidate.exists():
+            manifest_ref = str(manifest_candidate)
+        else:
+            raise HTTPException(status_code=404, detail=f"Manifest not found: {req.manifest_path}")
 
     from planner.rules import Rule
 
@@ -1028,7 +1062,7 @@ async def api_preview(req: PreviewRequest):
 
     try:
         from planner import load_manifest, plan_from_manifest
-        manifest = load_manifest(req.manifest_path)
+        manifest = in_memory_manifest if in_memory_manifest is not None else load_manifest(manifest_ref)
         result = plan_from_manifest(
             manifest=manifest,
             rules=rules,
