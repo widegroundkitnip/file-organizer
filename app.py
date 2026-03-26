@@ -15,6 +15,7 @@ Port: 3001
 
 from __future__ import annotations
 
+import asyncio
 import threading
 
 import hashlib
@@ -27,6 +28,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -72,6 +74,7 @@ _scan_progress_state = {
     "cancel_event": None,
 }
 _scan_progress_lock = threading.Lock()
+_scan_executor = ThreadPoolExecutor(max_workers=2)
 
 # In-memory manifest registry (populated by /api/scan after new-schema scans)
 # Key: manifest_id (str), Value: full manifest dict
@@ -265,66 +268,78 @@ async def api_scan(req: ScanRequest):
             cancel_event=cancel_event,
         )
 
-        # Update progress state to "hashing" if deep mode
-        with _scan_progress_lock:
-            _scan_progress_state["phase"] = "hashing" if req.mode == "deep" else "walking"
+        def run_scan() -> dict[str, Any]:
+            manifest = builder.scan()
 
-        manifest = builder.scan()
+            if cancel_event.is_set():
+                return {"cancelled": True}
 
-        if cancel_event.is_set():
+            manifest["schema_version"] = "2"
+            manifest["manifest_id"] = manifest_id
+
+            finder = CrossPathDuplicateFinder(manifest["files"])
+            dupes = finder.find()
+            tier1 = dupes.get("tier1", [])
+            tier2 = dupes.get("tier2", [])
+            tier3 = dupes.get("tier3") or []
+
+            analyzer = StructureAnalyzer(manifest, [path])
+            structure = analyzer.analyze()
+
+            from scanner.utils import find_empty_folders, find_hidden_folders
+            empty_folders = find_empty_folders(path, req.include_hidden)
+            hidden_folders = find_hidden_folders(path)
+
+            unknown_files = [
+                f for f in manifest["files"]
+                if f.get("classification") in ("unknown", "system")
+            ]
+
+            total_files = manifest.get("scan_meta", {}).get("total_files", 0)
+            manifest_path = SCANS_DIR / f"{manifest_id}.json"
+            with open(manifest_path, "w", encoding="utf-8") as f:
+                json.dump(manifest, f, indent=2, ensure_ascii=False)
+
+            with _registry_lock:
+                _manifest_registry[manifest_id] = manifest
+
+            return {
+                "status": "ok",
+                "manifest_path": str(manifest_path),
+                "manifest_id": manifest_id,
+                "total_files": total_files,
+                "manifest": manifest,
+                "duplicates": tier1 + tier2 + tier3,
+                "tier1": tier1,
+                "tier2": tier2,
+                "tier3": tier3,
+                "structure": structure,
+                "empty_folders": empty_folders,
+                "hidden_folders": hidden_folders,
+                "unknown_files": unknown_files[:100],
+                "unknown_count": len(unknown_files),
+                "is_empty": len(manifest["files"]) == 0,
+            }
+
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(_scan_executor, run_scan)
+
+        if cancel_event.is_set() or result.get("cancelled"):
             with _scan_progress_lock:
                 _scan_progress_state["running"] = False
                 _scan_progress_state["phase"] = "cancelled"
+                _scan_progress_state["error"] = "Scan cancelled"
             raise HTTPException(status_code=499, detail="Scan cancelled")
 
-        # Add schema version to manifest
-        manifest["schema_version"] = "2"
-        manifest["manifest_id"] = manifest_id
+        with _scan_progress_lock:
+            _scan_progress_state["running"] = False
+            _scan_progress_state["phase"] = "done"
+            _scan_progress_state["manifest_path"] = result["manifest_path"]
+            _scan_progress_state["manifest_id"] = result["manifest_id"]
+            _scan_progress_state["total_files"] = result["total_files"]
+            _scan_progress_state["error"] = None
 
-        # Run duplicate detection (Tier 1/2/3)
-        finder = CrossPathDuplicateFinder(manifest["files"])
-        dupes = finder.find()
-        tier1 = dupes.get("tier1", [])
-        tier2 = dupes.get("tier2", [])
-        tier3 = dupes.get("tier3") or []
-
-        # Run structure analysis
-        analyzer = StructureAnalyzer(manifest, [path])
-        structure = analyzer.analyze()
-
-        # Compute empty_folders and hidden_folders
-        from scanner.utils import find_empty_folders, find_hidden_folders
-        empty_folders = find_empty_folders(path, req.include_hidden)
-        hidden_folders = find_hidden_folders(path)
-
-        # Unknown file summary
-        unknown_files = [
-            f for f in manifest["files"]
-            if f.get("classification") in ("unknown", "system")
-        ]
-
-        total_files = manifest.get("scan_meta", {}).get("total_files", 0)
-
-        # Store manifest in registry for /api/manifest/{id} compatibility
-        with _registry_lock:
-            _manifest_registry[manifest_id] = manifest
-
-        return {
-            "status": "ok",
-            "manifest_id": manifest_id,
-            "total_files": total_files,
-            "manifest": manifest,
-            "duplicates": tier1 + tier2 + tier3,
-            "tier1": tier1,
-            "tier2": tier2,
-            "tier3": tier3,
-            "structure": structure,
-            "empty_folders": empty_folders,
-            "hidden_folders": hidden_folders,
-            "unknown_files": unknown_files[:100],
-            "unknown_count": len(unknown_files),
-            "is_empty": len(manifest["files"]) == 0,
-        }
+        return result
 
     except HTTPException:
         raise
@@ -436,15 +451,23 @@ async def api_get_scan(scan_id: str):
     """Return scan metadata including the manifest path for a given scan id."""
     manifest_path = SCANS_DIR / f"{scan_id}.json"
     if not manifest_path.exists():
-        raise HTTPException(status_code=404, detail=f"Scan not found: {scan_id}")
+        with _registry_lock:
+            manifest = _manifest_registry.get(scan_id)
+        if manifest is None:
+            raise HTTPException(status_code=404, detail=f"Scan not found: {scan_id}")
+    else:
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to read scan: {e}")
     try:
-        with open(manifest_path, "r", encoding="utf-8") as f:
-            manifest = json.load(f)
         meta = manifest.get("scan_meta", {})
         return {
             "id": scan_id,
-            "manifest_path": str(manifest_path),
-            "filename": manifest_path.name,
+            "manifest_path": str(manifest_path) if manifest_path.exists() else scan_id,
+            "manifest_id": scan_id,
+            "filename": manifest_path.name if manifest_path.exists() else None,
             "path": meta.get("path", ""),
             "mode": meta.get("mode", ""),
             "timestamp": meta.get("timestamp", ""),
