@@ -1,6 +1,7 @@
 import json
 import os
 import hashlib
+import mimetypes
 import xxhash
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -10,6 +11,12 @@ from datetime import datetime
 from typing import List, Dict, Optional, Set
 from .utils import classify_file, is_venv_dir, is_git_dir, is_pycache, get_relative_path, normalize_path
 from .project_detect import detect_projects_in_dir
+
+try:
+    from PIL import ExifTags, Image
+except ImportError:
+    ExifTags = None
+    Image = None
 
 LARGE_FILE_THRESHOLD = 100 * 1024 * 1024  # 100 MB
 HASH_CACHE_SIZE = 8 * 1024  # xxhash chunk size for prefix hash (8KB)
@@ -33,6 +40,10 @@ class ScannedFile:
     symlink_target: Optional[str] = None
     is_duplicate: bool = False
     depth: int = 0
+    mime_type: Optional[str] = None
+    exif_date_taken: Optional[str] = None
+    exif_camera_make: Optional[str] = None
+    exif_camera_model: Optional[str] = None
 
 @dataclass
 class ScanMeta:
@@ -76,6 +87,11 @@ class ExtendedManifestBuilder:
         self.detected_project_roots: List[dict] = []
         self._project_suppressed: Set[str] = set()
         self._projects_lock = threading.Lock()
+        self._enrichment_pipeline = [
+            self._basic_metadata,
+            self._mime_enrichment,
+            self._exif_enrichment,
+        ]
 
     def scan(self) -> dict:
         self._phase = "walking"
@@ -182,27 +198,19 @@ class ExtendedManifestBuilder:
                 ext = ext.lower()
                 classification = classify_file(name_clean, ext)
                 size = st.st_size
-                modified = datetime.fromtimestamp(st.st_mtime).isoformat()
-                f = ScannedFile(
-                    path=full_path,
-                    relative_path=normalize_path(os.path.join(rel_dir, name)),
+                f = self._apply_enrichment_pipeline(
+                    full_path=full_path,
+                    rel_dir=rel_dir,
                     parent_tree=parent_tree,
                     name=name,
                     ext=ext,
-                    size_bytes=size,
-                    modified_ts=modified,
-                    mtime=st.st_mtime,
-                    ctime=st.st_ctime,
-                    category=self._category_from_ext(ext),
+                    st=st,
                     classification=classification,
                     is_symlink=is_symlink,
                     depth=depth,
                 )
-                if is_symlink:
-                    try:
-                        f.symlink_target = os.readlink(full_path)
-                    except OSError:
-                        pass
+                if f is None:
+                    continue
                 if self.mode == "deep":
                     f.prefix_hash = self._prefix_hash(full_path)
                     if size <= LARGE_FILE_THRESHOLD:
@@ -216,6 +224,91 @@ class ExtendedManifestBuilder:
                     self.files.append(f)
                     self._file_count += 1
                     self._total_size += size
+
+    def _apply_enrichment_pipeline(self, **kwargs) -> Optional[ScannedFile]:
+        scanned_file = None
+        for enrich in self._enrichment_pipeline:
+            scanned_file = enrich(scanned_file, **kwargs)
+            if scanned_file is None:
+                return None
+        return scanned_file
+
+    def _basic_metadata(self, scanned_file: Optional[ScannedFile], **kwargs) -> Optional[ScannedFile]:
+        if scanned_file is not None:
+            return scanned_file
+
+        full_path = kwargs["full_path"]
+        rel_dir = kwargs["rel_dir"]
+        name = kwargs["name"]
+        ext = kwargs["ext"]
+        st = kwargs["st"]
+        classification = kwargs["classification"]
+        is_symlink = kwargs["is_symlink"]
+
+        scanned_file = ScannedFile(
+            path=full_path,
+            relative_path=normalize_path(os.path.join(rel_dir, name)),
+            parent_tree=kwargs["parent_tree"],
+            name=name,
+            ext=ext,
+            size_bytes=st.st_size,
+            modified_ts=datetime.fromtimestamp(st.st_mtime).isoformat(),
+            mtime=st.st_mtime,
+            ctime=st.st_ctime,
+            category=self._category_from_ext(ext),
+            classification=classification,
+            is_symlink=is_symlink,
+            depth=kwargs["depth"],
+        )
+        if is_symlink:
+            try:
+                scanned_file.symlink_target = os.readlink(full_path)
+            except OSError:
+                pass
+        return scanned_file
+
+    def _mime_enrichment(self, scanned_file: Optional[ScannedFile], **kwargs) -> Optional[ScannedFile]:
+        if scanned_file is None:
+            return None
+        mime_type, _ = mimetypes.guess_type(scanned_file.path, strict=False)
+        scanned_file.mime_type = mime_type
+        return scanned_file
+
+    def _exif_enrichment(self, scanned_file: Optional[ScannedFile], **kwargs) -> Optional[ScannedFile]:
+        if scanned_file is None or Image is None or ExifTags is None:
+            return scanned_file
+        if scanned_file.category != "images":
+            return scanned_file
+
+        try:
+            with Image.open(scanned_file.path) as image:
+                exif = image.getexif()
+        except Exception:
+            return scanned_file
+
+        if not exif:
+            return scanned_file
+
+        tags = {
+            ExifTags.TAGS.get(tag_id, tag_id): value
+            for tag_id, value in exif.items()
+        }
+        scanned_file.exif_date_taken = self._normalize_exif_value(
+            tags.get("DateTimeOriginal")
+            or tags.get("DateTimeDigitized")
+            or tags.get("DateTime")
+        )
+        scanned_file.exif_camera_make = self._normalize_exif_value(tags.get("Make"))
+        scanned_file.exif_camera_model = self._normalize_exif_value(tags.get("Model"))
+        return scanned_file
+
+    def _normalize_exif_value(self, value) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", errors="ignore")
+        value = str(value).strip()
+        return value or None
 
     def _prefix_hash(self, path: str) -> str:
         """Fast xxhash of first 8KB."""
@@ -311,3 +404,7 @@ def build_cross_manifest(paths: List[str], mode: str = "fast",
         hash_cache=hash_cache,
     )
     return builder.scan()
+
+
+class ManifestScanner(ExtendedManifestBuilder):
+    """Backward-compatible scanner name used by callers and docs."""

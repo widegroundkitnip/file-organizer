@@ -232,6 +232,48 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function renderPathDisplay(targetId, path) {
+  const display = document.getElementById(`${targetId}-display`);
+  if (!display) return;
+
+  if (path) {
+    display.dataset.path = path;
+    display.innerHTML = `<span>📁</span><span>${escHtml(path)}</span>`;
+    display.classList.remove('path-display-empty');
+    display.style.color = 'var(--text)';
+    return;
+  }
+
+  display.dataset.path = '';
+  display.innerHTML = '<span>📁</span><span style="color:var(--muted);font-style:italic">click to browse...</span>';
+  display.classList.add('path-display-empty');
+  display.style.color = 'var(--muted)';
+}
+
+function setSelectedPath(targetId, path) {
+  const cleanPath = (path || '').trim();
+  const target = document.getElementById(targetId);
+  if (target && 'value' in target) {
+    target.value = cleanPath;
+  }
+  renderPathDisplay(targetId, cleanPath);
+  return cleanPath;
+}
+
+function getSelectedPath(targetId) {
+  const target = document.getElementById(targetId);
+  if (target && 'value' in target) {
+    const value = target.value.trim();
+    if (value) return value;
+  }
+
+  const display = document.getElementById(`${targetId}-display`);
+  if (display && display.dataset && display.dataset.path) {
+    return display.dataset.path.trim();
+  }
+  return '';
+}
+
 // ---------------------------------------------------------------------------
 // Scan page
 // ---------------------------------------------------------------------------
@@ -279,8 +321,7 @@ async function loadScan(scanId) {
 }
 
 async function startScan() {
-  const pathInput = document.getElementById('scan-path');
-  const path = (pathInput && pathInput.value.trim()) || '';
+  const path = getSelectedPath('scan-path');
   if (!path) {
     showAlert('scan-alert', 'warning', 'Enter a folder path to scan.');
     return;
@@ -1980,19 +2021,12 @@ async function browseFolder(targetId) {
         const res = await fetch('/api/browse');
         const data = await res.json();
         if (data.ok && data.path) {
-            const target = document.getElementById(targetId);
-            if (target) target.value = data.path;
-            const disp = document.getElementById(targetId + '-display');
-            if (disp) {
-                disp.innerHTML = '<span>📁</span><span>' + data.path + '</span>';
-                disp.classList.remove('path-display-empty');
-                disp.style.color = 'var(--text)';
-                disp.onclick = null;
-            }
+            setSelectedPath(targetId, data.path);
             return;
         }
     } catch(e) {}
-    document.getElementById('scan-path-picker').click();
+    var picker = document.getElementById(targetId + '-picker') || document.getElementById('scan-path-picker');
+    if (picker) picker.click();
 }
 
 async function asyncBrowseFolderByIndex(idx) {
@@ -2043,15 +2077,7 @@ function handleBrowseFolder(input, targetId) {
 
     // Apply to target
     if (target.tagName === 'INPUT') {
-        target.value = resolvedPath;
-        var dispId = targetId + '-display';
-        var disp = document.getElementById(dispId);
-        if (disp) {
-            disp.textContent = resolvedPath;
-            disp.classList.remove('path-display-empty');
-            disp.style.color = 'var(--text)';
-            disp.onclick = null;
-        }
+        setSelectedPath(targetId, resolvedPath);
     } else {
         target.textContent = resolvedPath;
         target.classList.remove('path-display-empty');
@@ -2078,7 +2104,7 @@ async function createMockData() {
         var d = await r.json();
         status.textContent = 'Done! ' + (d.output || '');
         status.style.color = '#22c55e';
-        document.getElementById('scan-path').value = path;
+        setSelectedPath('scan-path', path);
         navigate('scan');
     } catch(e) {
         status.textContent = 'Error: ' + e.message;
