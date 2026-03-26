@@ -123,7 +123,7 @@
           <div style="display:flex;gap:8px;align-items:center">
             <input type="file" id="scan-path-picker" webkitdirectory style="display:none" onchange="handleBrowseFolder(this, 'scan-path')">
             <input type="hidden" id="scan-path" value="">
-            <div id="scan-path-display" onclick="document.getElementById('scan-path-picker').click()" style="flex:1;padding:8px 12px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--muted);font-family:monospace;font-size:13px;cursor:pointer;min-height:36px;display:flex;align-items:center;gap:8px" class="path-display-empty"><span>📁</span><span>/path/to/folder — click to browse</span></div>
+            <div id="scan-path-display" onclick="document.getElementById('scan-path-picker').click()" style="flex:1;padding:8px 12px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--muted);font-family:monospace;font-size:13px;cursor:pointer;min-height:36px;display:flex;align-items:center;gap:8px" class="path-display-empty"><span>📁</span><span style="color:var(--muted);font-style:italic">click to browse…</span></div>
             <button class="btn btn-secondary" onclick="document.getElementById('scan-path-picker').click()" style="white-space:nowrap">📁 Browse</button>
           </div>
         </div>
@@ -469,7 +469,7 @@
         <label style="color:var(--text);font-size:13px;margin-bottom:6px;display:block">Where to create (full path):</label>
         <div style="display:flex;gap:8px">
           <input type="file" id="mock-path-picker" webkitdirectory style="display:none" onchange="handleBrowseFolder(this, 'mock-path')">
-          <div id="mock-path-display" onclick="document.getElementById('mock-path-picker').click()" style="flex:1;padding:10px 12px;border-radius:8px;border:1px solid #333;background:var(--surface);color:var(--muted);font-family:monospace;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px" class="path-display-empty"><span>📁</span><span>/Users/sigge/test_workspace — click to browse</span></div>
+          <div id="mock-path-display" onclick="document.getElementById('mock-path-picker').click()" style="flex:1;padding:10px 12px;border-radius:8px;border:1px solid #333;background:var(--surface);color:var(--muted);font-family:monospace;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px" class="path-display-empty"><span>📁</span><span style="color:var(--muted);font-style:italic">click to browse…</span></div>
           <button class="btn btn-secondary" onclick="document.getElementById('mock-path-picker').click()">📁 Browse</button>
         </div>
       </div>

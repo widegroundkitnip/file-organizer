@@ -1982,19 +1982,41 @@ async function asyncBrowseFolderByIndex(idx) {
 function handleBrowseFolder(input, targetId) {
     var files = input.files;
     if (!files || files.length === 0) return;
-    var dir = files[0].webkitRelativePath.split('/')[0];
     var target = document.getElementById(targetId);
     if (!target) return;
+
+    // Try to get the full path from the File API (works on macOS local pages)
     var fullPath = files[0].path || '';
     var resolvedPath = '';
-    if (fullPath) {
-        resolvedPath = fullPath.substring(0, fullPath.indexOf(dir) + dir.length) || dir;
+
+    if (fullPath && fullPath.startsWith('/')) {
+        // macOS: fullPath is the full filesystem path of the selected directory
+        // files[0].path = /Users/sigge/Downloads/photo.jpg
+        // webkitRelativePath = photo.jpg
+        // We want /Users/sigge/Downloads
+        var relPath = files[0].webkitRelativePath || '';
+        var fileName = relPath.split('/').filter(Boolean)[0] || '';
+        if (fileName && fullPath.endsWith('/' + fileName)) {
+            resolvedPath = fullPath.substring(0, fullPath.length - fileName.length - 1);
+        } else if (fullPath.includes('/')) {
+            // Try to extract directory
+            var lastSlash = fullPath.lastIndexOf('/');
+            resolvedPath = fullPath.substring(0, lastSlash);
+        } else {
+            resolvedPath = fullPath;
+        }
     } else {
+        // Fallback for restricted browsers: use directory name
+        var dir = files[0].webkitRelativePath.split('/').filter(Boolean)[0] || 'selected-folder';
         resolvedPath = '/' + dir;
     }
+
+    // Clear the input immediately to prevent re-selection issues
+    input.value = '';
+
+    // Apply to target
     if (target.tagName === 'INPUT') {
         target.value = resolvedPath;
-        // Sync a companion display div if it exists (e.g. scan-path → scan-path-display)
         var dispId = targetId + '-display';
         var disp = document.getElementById(dispId);
         if (disp) {
@@ -2004,13 +2026,11 @@ function handleBrowseFolder(input, targetId) {
             disp.onclick = null;
         }
     } else {
-        // Div display — update text and mark as non-empty
         target.textContent = resolvedPath;
         target.classList.remove('path-display-empty');
         target.style.color = 'var(--text)';
-        target.onclick = null; // no longer clickable once set (file picker is the control)
+        target.onclick = null;
     }
-    input.value = '';
 }
 
 // ── Mock Data Generator ───────────────────────────────────────────────────────
