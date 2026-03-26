@@ -886,7 +886,7 @@ async def api_duplicate_execute_review(req: DuplicateConsolidateRequest):
             pass
 
     if result.returncode != 0:
-        raise Exception(f"Command failed: {result.stderr}")
+        raise HTTPException(status_code=500, detail=f"Command failed: {result.stderr}")
 
     # Find the undo log path from output dir
     undo_log_path = ""
@@ -1296,11 +1296,6 @@ async def api_execute(req: ExecuteRequest):
 # ---------------------------------------------------------------------------
 # API: Multi-path scan (Sprint 3)
 # ---------------------------------------------------------------------------
-
-from typing import List
-
-from scanner import build_cross_manifest, CrossPathDuplicateFinder, StructureAnalyzer
-from planner import plan_from_manifest, RuleManager
 
 
 class MultiPathScanRequest(BaseModel):
