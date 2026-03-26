@@ -1,5 +1,5 @@
-from dataclasses import dataclass, field
-from typing import List, Optional
+from dataclasses import dataclass
+from typing import Any, List, Optional
 
 
 # Extended extension sets (PROF-009)
@@ -16,6 +16,9 @@ class RunProfile:
     id: str
     name: str
     description: str
+    workflow_type: str
+    safety_level: str
+    profile_origin: str
     icon: str  # emoji
     # PROF-011: user-facing labels for each scope mode
     scope_labels: dict  # e.g. {"global_organize": "Organize across all folders", ...}
@@ -25,11 +28,210 @@ class RunProfile:
     default_scope_mode: str
 
 
+ALLOWED_WORKFLOW_TYPES = [
+    "photo_organizer",
+    "document_sorter",
+    "dev_cleaner",
+    "media_archiver",
+    "custom",
+]
+ALLOWED_SAFETY_LEVELS = ["safe", "standard", "aggressive"]
+ALLOWED_PROFILE_ORIGINS = ["builtin", "user"]
+ALLOWED_SCOPE_MODES = ["global_organize", "preserve_parent_boundaries", "project_safe_mode"]
+DEFAULT_SCOPE_LABELS = {
+    "global_organize": "Organize across all folders",
+    "preserve_parent_boundaries": "Keep files inside each folder",
+    "project_safe_mode": "Protect detected projects",
+}
+
+
+def _slugify_profile_id(text: str) -> str:
+    chars = []
+    for ch in (text or "").strip().lower():
+        if ch.isalnum():
+            chars.append(ch)
+        else:
+            chars.append("_")
+    slug = "".join(chars).strip("_")
+    while "__" in slug:
+        slug = slug.replace("__", "_")
+    return slug
+
+
+def _clean_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for item in value:
+        if isinstance(item, str):
+            cleaned = item.strip()
+            if cleaned:
+                out.append(cleaned)
+    return out
+
+
+def validate_profile(profile_dict: dict) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(profile_dict, dict):
+        return ["profile must be an object"]
+
+    profile_id = profile_dict.get("id")
+    if not isinstance(profile_id, str) or not profile_id.strip():
+        errors.append("id is required and must be a non-empty string")
+
+    name = profile_dict.get("name")
+    if not isinstance(name, str) or not name.strip():
+        errors.append("name is required and must be a non-empty string")
+
+    description = profile_dict.get("description")
+    if not isinstance(description, str):
+        errors.append("description is required and must be a string")
+
+    icon = profile_dict.get("icon")
+    if not isinstance(icon, str) or not icon.strip():
+        errors.append("icon is required and must be a non-empty string")
+
+    workflow_type = profile_dict.get("workflow_type")
+    if workflow_type not in ALLOWED_WORKFLOW_TYPES:
+        errors.append(
+            f"workflow_type must be one of: {', '.join(ALLOWED_WORKFLOW_TYPES)}"
+        )
+
+    safety_level = profile_dict.get("safety_level")
+    if safety_level not in ALLOWED_SAFETY_LEVELS:
+        errors.append(
+            f"safety_level must be one of: {', '.join(ALLOWED_SAFETY_LEVELS)}"
+        )
+
+    profile_origin = profile_dict.get("profile_origin")
+    if profile_origin not in ALLOWED_PROFILE_ORIGINS:
+        errors.append(
+            f"profile_origin must be one of: {', '.join(ALLOWED_PROFILE_ORIGINS)}"
+        )
+
+    scope_labels = profile_dict.get("scope_labels")
+    if not isinstance(scope_labels, dict):
+        errors.append("scope_labels must be an object")
+    else:
+        for scope_mode in ALLOWED_SCOPE_MODES:
+            value = scope_labels.get(scope_mode)
+            if not isinstance(value, str) or not value.strip():
+                errors.append(
+                    f"scope_labels must include non-empty label for '{scope_mode}'"
+                )
+
+    categories = profile_dict.get("categories")
+    if not isinstance(categories, list) or not all(isinstance(x, str) for x in categories):
+        errors.append("categories must be a list of strings")
+
+    rule_bundle = profile_dict.get("rule_bundle")
+    if not isinstance(rule_bundle, list) or not all(isinstance(x, dict) for x in rule_bundle):
+        errors.append("rule_bundle must be a list of rule objects")
+
+    allowed_scope_modes = profile_dict.get("allowed_scope_modes")
+    if not isinstance(allowed_scope_modes, list) or not allowed_scope_modes:
+        errors.append("allowed_scope_modes must be a non-empty list")
+    else:
+        invalid_modes = [m for m in allowed_scope_modes if m not in ALLOWED_SCOPE_MODES]
+        if invalid_modes:
+            errors.append(
+                "allowed_scope_modes contains unsupported values: "
+                + ", ".join(sorted(set(invalid_modes)))
+            )
+
+    default_scope_mode = profile_dict.get("default_scope_mode")
+    if not isinstance(default_scope_mode, str) or not default_scope_mode.strip():
+        errors.append("default_scope_mode must be a non-empty string")
+    elif isinstance(allowed_scope_modes, list) and default_scope_mode not in allowed_scope_modes:
+        errors.append("default_scope_mode must be included in allowed_scope_modes")
+
+    return errors
+
+
+def profile_from_dict(profile_dict: dict, default_origin: str = "user") -> RunProfile:
+    name = str(profile_dict.get("name", "")).strip()
+    profile_id = str(profile_dict.get("id", "")).strip()
+    if not profile_id:
+        profile_id = _slugify_profile_id(name) or "user_profile"
+
+    allowed_scope_modes = _clean_string_list(profile_dict.get("allowed_scope_modes"))
+    if not allowed_scope_modes:
+        allowed_scope_modes = list(ALLOWED_SCOPE_MODES)
+    else:
+        allowed_scope_modes = [m for m in allowed_scope_modes if m in ALLOWED_SCOPE_MODES]
+        if not allowed_scope_modes:
+            allowed_scope_modes = list(ALLOWED_SCOPE_MODES)
+
+    raw_scope_labels = profile_dict.get("scope_labels")
+    scope_labels = dict(DEFAULT_SCOPE_LABELS)
+    if isinstance(raw_scope_labels, dict):
+        for key, value in raw_scope_labels.items():
+            if isinstance(key, str) and isinstance(value, str) and value.strip():
+                scope_labels[key] = value.strip()
+    for scope_mode in ALLOWED_SCOPE_MODES:
+        scope_labels.setdefault(scope_mode, DEFAULT_SCOPE_LABELS[scope_mode])
+
+    default_scope_mode = str(profile_dict.get("default_scope_mode", "")).strip()
+    if default_scope_mode not in allowed_scope_modes:
+        default_scope_mode = allowed_scope_modes[0]
+
+    workflow_type = str(profile_dict.get("workflow_type", "custom")).strip()
+    if workflow_type not in ALLOWED_WORKFLOW_TYPES:
+        workflow_type = "custom"
+
+    safety_level = str(profile_dict.get("safety_level", "standard")).strip()
+    if safety_level not in ALLOWED_SAFETY_LEVELS:
+        safety_level = "standard"
+
+    profile_origin = str(profile_dict.get("profile_origin", default_origin)).strip()
+    if profile_origin not in ALLOWED_PROFILE_ORIGINS:
+        profile_origin = default_origin if default_origin in ALLOWED_PROFILE_ORIGINS else "user"
+
+    categories = _clean_string_list(profile_dict.get("categories")) or ["all"]
+    rule_bundle_raw = profile_dict.get("rule_bundle")
+    rule_bundle = [item for item in rule_bundle_raw if isinstance(item, dict)] if isinstance(rule_bundle_raw, list) else []
+
+    return RunProfile(
+        id=profile_id,
+        name=name or profile_id,
+        description=str(profile_dict.get("description", "")),
+        workflow_type=workflow_type,
+        safety_level=safety_level,
+        profile_origin=profile_origin,
+        icon=str(profile_dict.get("icon", "🧩")) or "🧩",
+        scope_labels=scope_labels,
+        categories=categories,
+        rule_bundle=rule_bundle,
+        allowed_scope_modes=allowed_scope_modes,
+        default_scope_mode=default_scope_mode,
+    )
+
+
+def profile_to_dict(profile: RunProfile) -> dict:
+    return {
+        "id": profile.id,
+        "name": profile.name,
+        "description": profile.description,
+        "workflow_type": profile.workflow_type,
+        "safety_level": profile.safety_level,
+        "profile_origin": profile.profile_origin,
+        "icon": profile.icon,
+        "scope_labels": dict(profile.scope_labels),
+        "categories": list(profile.categories),
+        "rule_bundle": list(profile.rule_bundle),
+        "allowed_scope_modes": list(profile.allowed_scope_modes),
+        "default_scope_mode": profile.default_scope_mode,
+    }
+
+
 PROFILES = [
     RunProfile(
         id="generic",
         name="Generic",
         description="Neutral scan with no preset rules. Browse, inspect, and manually decide.",
+        workflow_type="custom",
+        safety_level="safe",
+        profile_origin="builtin",
         icon="🔍",
         scope_labels={
             "global_organize": "Organize across all folders",
@@ -47,6 +249,9 @@ PROFILES = [
         id="downloads_cleanup",
         name="Downloads Cleanup",
         description="Tame your Downloads folder — sort files by type and age. Move old files to archive.",
+        workflow_type="document_sorter",
+        safety_level="standard",
+        profile_origin="builtin",
         icon="📥",
         scope_labels={
             "global_organize": "Organize across all folders",
@@ -137,6 +342,9 @@ PROFILES = [
         id="duplicates_review",
         name="Duplicates Review",
         description="Find duplicate files across folders. Identify keepers and remove copies.",
+        workflow_type="dev_cleaner",
+        safety_level="safe",
+        profile_origin="builtin",
         icon="🔀",
         scope_labels={
             "global_organize": "Scan across all folders",
@@ -154,6 +362,9 @@ PROFILES = [
         id="screenshots",
         name="Screenshots",
         description="Gather all screenshots into one place, organized by month taken.",
+        workflow_type="photo_organizer",
+        safety_level="standard",
+        profile_origin="builtin",
         icon="🖼",
         scope_labels={
             "global_organize": "Collect from all folders",
@@ -185,6 +396,9 @@ PROFILES = [
         id="camera_import",
         name="Camera Import",
         description="Organize photos from camera memory cards. Group by date, separate RAW from JPG.",
+        workflow_type="photo_organizer",
+        safety_level="safe",
+        profile_origin="builtin",
         icon="📷",
         scope_labels={
             "global_organize": "Organize across all folders",
@@ -230,6 +444,9 @@ PROFILES = [
         id="project_safe",
         name="Project-Safe Scan",
         description="Scan broadly but never touch files inside project roots (repos, workspaces).",
+        workflow_type="dev_cleaner",
+        safety_level="safe",
+        profile_origin="builtin",
         icon="🛡",
         scope_labels={
             "global_organize": "Scan across all folders",
@@ -269,6 +486,9 @@ PROFILES = [
         id="mixed_sort",
         name="Mixed Type Sort",
         description="Organize a mixed folder by type and date. Good for Downloads, Desktop, or project dumps.",
+        workflow_type="media_archiver",
+        safety_level="standard",
+        profile_origin="builtin",
         icon="🗂",
         scope_labels={
             "global_organize": "Organize across all folders",
@@ -329,6 +549,9 @@ PROFILES = [
         id="review_only",
         name="Review Only",
         description="Deep scan to surface duplicates, unknowns, and structural issues. No rules fire.",
+        workflow_type="custom",
+        safety_level="safe",
+        profile_origin="builtin",
         icon="📋",
         scope_labels={
             "global_organize": "Scan across all folders",
@@ -343,8 +566,19 @@ PROFILES = [
 ]
 
 
-def get_profile(profile_id: str) -> Optional[RunProfile]:
-    for p in PROFILES:
+def iter_profiles(user_profiles: Optional[list[dict]] = None) -> list[RunProfile]:
+    merged = list(PROFILES)
+    for raw in user_profiles or []:
+        if not isinstance(raw, dict):
+            continue
+        if validate_profile(raw):
+            continue
+        merged.append(profile_from_dict(raw, default_origin="user"))
+    return merged
+
+
+def get_profile(profile_id: str, user_profiles: Optional[list[dict]] = None) -> Optional[RunProfile]:
+    for p in iter_profiles(user_profiles):
         if p.id == profile_id:
             return p
     return None

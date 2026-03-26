@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -102,6 +103,7 @@ def load_settings() -> dict:
         "parent_folders": [],
         "rules": [],
         "exclude_patterns": [],
+        "user_profiles": [],
     }
 
 
@@ -110,6 +112,24 @@ def save_settings(data: dict) -> None:
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
     os.replace(tmp, SETTINGS_PATH)
+
+
+def _read_user_profiles(settings: dict) -> list[dict]:
+    raw_profiles = settings.get("user_profiles", [])
+    if not isinstance(raw_profiles, list):
+        return []
+    return [item for item in raw_profiles if isinstance(item, dict)]
+
+
+def _write_user_profiles(settings: dict, user_profiles: list[dict]) -> None:
+    settings["user_profiles"] = user_profiles
+    save_settings(settings)
+
+
+def _slugify_profile_id(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", (name or "").strip().lower())
+    slug = re.sub(r"_+", "_", slug).strip("_")
+    return slug
 
 
 # ---------------------------------------------------------------------------
@@ -796,33 +816,169 @@ async def api_duplicate_execute_review(req: DuplicateConsolidateRequest):
 
 @app.get("/api/profiles")
 async def api_get_profiles():
-    from planner.profiles import PROFILES
-    return [
+    from planner.profiles import iter_profiles, profile_to_dict
+
+    settings = load_settings()
+    user_profiles = _read_user_profiles(settings)
+    profiles = iter_profiles(user_profiles)
+    return [profile_to_dict(p) for p in profiles]
+
+
+@app.post("/api/profiles")
+async def api_create_profile(body: dict):
+    from planner.profiles import (
+        ALLOWED_SCOPE_MODES,
+        PROFILES,
+        profile_from_dict,
+        profile_to_dict,
+        validate_profile,
+    )
+
+    payload = dict(body or {})
+    payload["profile_origin"] = "user"
+
+    if not payload.get("id"):
+        generated_id = _slugify_profile_id(str(payload.get("name", "")))
+        payload["id"] = generated_id or f"user_profile_{int(datetime.now(tz=timezone.utc).timestamp())}"
+
+    payload.setdefault("description", "")
+    payload.setdefault("icon", "🧩")
+    payload.setdefault(
+        "scope_labels",
         {
-            "id": p.id,
-            "name": p.name,
-            "description": p.description,
-            "icon": p.icon,
-            "scope_labels": p.scope_labels,  # PROF-011: user-facing scope mode labels
-            "allowed_scope_modes": p.allowed_scope_modes,
-            "default_scope_mode": p.default_scope_mode,
-        }
-        for p in PROFILES
-    ]
+            "global_organize": "Organize across all folders",
+            "preserve_parent_boundaries": "Keep files inside each folder",
+            "project_safe_mode": "Protect detected projects",
+        },
+    )
+    payload.setdefault("categories", ["all"])
+    payload.setdefault("rule_bundle", [])
+    payload.setdefault("allowed_scope_modes", list(ALLOWED_SCOPE_MODES))
+    payload.setdefault("default_scope_mode", "preserve_parent_boundaries")
+    payload.setdefault("workflow_type", "custom")
+    payload.setdefault("safety_level", "standard")
+
+    errors = validate_profile(payload)
+    if errors:
+        raise HTTPException(status_code=400, detail={"errors": errors})
+    if payload.get("profile_origin") != "user":
+        raise HTTPException(status_code=400, detail="profile_origin must be 'user'")
+
+    settings = load_settings()
+    user_profiles = _read_user_profiles(settings)
+    builtin_ids = {p.id for p in PROFILES}
+    builtin_names = {p.name for p in PROFILES}
+    user_ids = {str(p.get("id", "")).strip() for p in user_profiles}
+    user_names = {str(p.get("name", "")).strip() for p in user_profiles}
+
+    if payload["id"] in builtin_ids or payload["id"] in user_ids:
+        raise HTTPException(status_code=409, detail=f"Profile id already exists: {payload['id']}")
+    if payload["name"] in builtin_names or payload["name"] in user_names:
+        raise HTTPException(status_code=409, detail=f"Profile name already exists: {payload['name']}")
+
+    profile = profile_from_dict(payload, default_origin="user")
+    profile_dict = profile_to_dict(profile)
+    user_profiles.append(profile_dict)
+    _write_user_profiles(settings, user_profiles)
+    return profile_dict
+
+
+@app.put("/api/profiles/{name}")
+async def api_update_profile(name: str, body: dict):
+    from planner.profiles import (
+        PROFILES,
+        profile_from_dict,
+        profile_to_dict,
+        validate_profile,
+    )
+
+    settings = load_settings()
+    user_profiles = _read_user_profiles(settings)
+    builtin_ids = {p.id for p in PROFILES}
+    builtin_names = {p.name for p in PROFILES}
+
+    if name in builtin_ids or name in builtin_names:
+        raise HTTPException(status_code=403, detail="Built-in profiles cannot be updated")
+
+    target_idx = -1
+    for idx, profile in enumerate(user_profiles):
+        if str(profile.get("name", "")) == name:
+            target_idx = idx
+            break
+    if target_idx < 0:
+        raise HTTPException(status_code=404, detail=f"User profile not found: {name}")
+
+    existing = dict(user_profiles[target_idx])
+    payload = dict(existing)
+    payload.update(body or {})
+    payload["profile_origin"] = "user"
+    if not payload.get("id"):
+        payload["id"] = existing.get("id") or _slugify_profile_id(str(payload.get("name", "")))
+
+    errors = validate_profile(payload)
+    if errors:
+        raise HTTPException(status_code=400, detail={"errors": errors})
+
+    for idx, profile in enumerate(user_profiles):
+        if idx == target_idx:
+            continue
+        if str(profile.get("id", "")) == payload["id"]:
+            raise HTTPException(status_code=409, detail=f"Profile id already exists: {payload['id']}")
+        if str(profile.get("name", "")) == payload["name"]:
+            raise HTTPException(status_code=409, detail=f"Profile name already exists: {payload['name']}")
+    if payload["id"] in builtin_ids:
+        raise HTTPException(status_code=409, detail=f"Profile id already exists: {payload['id']}")
+    if payload["name"] in builtin_names:
+        raise HTTPException(status_code=409, detail=f"Profile name already exists: {payload['name']}")
+
+    profile = profile_from_dict(payload, default_origin="user")
+    profile_dict = profile_to_dict(profile)
+    user_profiles[target_idx] = profile_dict
+    _write_user_profiles(settings, user_profiles)
+    return profile_dict
+
+
+@app.delete("/api/profiles/{name}")
+async def api_delete_profile(name: str):
+    from planner.profiles import PROFILES
+
+    settings = load_settings()
+    user_profiles = _read_user_profiles(settings)
+    builtin_ids = {p.id for p in PROFILES}
+    builtin_names = {p.name for p in PROFILES}
+
+    if name in builtin_ids or name in builtin_names:
+        raise HTTPException(status_code=403, detail="Built-in profiles cannot be deleted")
+
+    target_idx = -1
+    for idx, profile in enumerate(user_profiles):
+        if str(profile.get("name", "")) == name:
+            target_idx = idx
+            break
+    if target_idx < 0:
+        raise HTTPException(status_code=404, detail=f"User profile not found: {name}")
+
+    removed = user_profiles.pop(target_idx)
+    _write_user_profiles(settings, user_profiles)
+    return {"deleted": str(removed.get("name", name))}
 
 
 @app.post("/api/profiles/{profile_id}/generate-rules")
 async def api_generate_rules(profile_id: str):
     from planner.profiles import get_profile
     from planner.rules import Rule
-    profile = get_profile(profile_id)
+
+    settings = load_settings()
+    user_profiles = _read_user_profiles(settings)
+    profile = get_profile(profile_id, user_profiles=user_profiles)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
+
+    rm = RuleManager(str(BASE_DIR / "rules.json"))
     added = []
     for rule_dict in profile.rule_bundle:
         rule = Rule.from_dict(rule_dict)
         rule.enabled = False
-        rm = RuleManager(str(BASE_DIR / "rules.json"))
         rm.add_rule(rule)
         added.append(rule.id)
     rm.save()
