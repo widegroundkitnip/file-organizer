@@ -189,18 +189,34 @@ function categoryEmoji(cat) {
 }
 
 function getCategory(file) {
+  // PROF-009: expanded extension coverage
   const extMap = {
-    jpg:'Images',jpeg:'Images',png:'Images',gif:'Images',bmp:'Images',tiff:'Images',
-    webp:'Images',heic:'Images',raw:'Images',cr2:'Images',nef:'Images',arw:'Images',
-    mp4:'Video',mov:'Video',avi:'Video',mkv:'Video',wmv:'Video',flv:'Video',
-    webm:'Video',m4v:'Video',
-    mp3:'Audio',wav:'Audio',flac:'Audio',aac:'Audio',ogg:'Audio',m4a:'Audio',wma:'Audio',
+    // Images
+    jpg:'Images',jpeg:'Images',png:'Images',gif:'Images',bmp:'Images',tiff:'Images',tif:'Images',
+    webp:'Images',heic:'Images',heif:'Images',dng:'Images',arw:'Images',cr2:'Images',
+    nef:'Images',srw:'Images',raw:'Images',raf:'Images',orf:'Images',rw2:'Images',
+    // Video
+    mp4:'Video',mov:'Video',mkv:'Video',avi:'Video',flv:'Video',wmv:'Video',
+    webm:'Video',m4v:'Video',mpg:'Video',mpeg:'Video',ts:'Video','3gp':'Video',
+    // Audio
+    mp3:'Audio',wav:'Audio',flac:'Audio',aac:'Audio',ogg:'Audio',m4a:'Audio',
+    wma:'Audio',opus:'Audio',aiff:'Audio',
+    // Documents
     pdf:'Documents',doc:'Documents',docx:'Documents',xls:'Documents',xlsx:'Documents',
-    ppt:'Documents',pptx:'Documents',odt:'Documents',ods:'Documents',
-    py:'Code',js:'Code',ts:'Code',java:'Code',cpp:'Code',c:'Code',h:'Code',
-    rs:'Code',go:'Code',rb:'Code',php:'Code',html:'Code',css:'Code',
-    json:'Code',yaml:'Code',toml:'Code',sh:'Code',
-    zip:'Archives',rar:'Archives','7z':'Archives',tar:'Archives',gz:'Archives',bz2:'Archives',
+    ppt:'Documents',pptx:'Documents',pptm:'Documents',odt:'Documents',ods:'Documents',
+    odp:'Documents',txt:'Documents',md:'Documents',rtf:'Documents',csv:'Documents',
+    // Code
+    py:'Code',js:'Code',ts:'Code',jsx:'Code',tsx:'Code',java:'Code',
+    c:'Code',cpp:'Code',h:'Code',hpp:'Code',cs:'Code',go:'Code',rs:'Code',
+    rb:'Code',php:'Code',swift:'Code',kt:'Code',scala:'Code',lua:'Code',
+    r:'Code',pl:'Code',pm:'Code',sh:'Code',bash:'Code',zsh:'Code',
+    ps1:'Code',css:'Code',scss:'Code',sass:'Code',less:'Code',
+    html:'Code',htm:'Code',xml:'Code',json:'Code',yaml:'Code',yml:'Code',
+    toml:'Code',sql:'Code',ipynb:'Code',
+    // Archives
+    zip:'Archives',rar:'Archives','7z':'Archives',tar:'Archives',gz:'Archives',
+    bz2:'Archives',xz:'Archives',tgz:'Archives',iso:'Archives',dmg:'Archives',
+    cab:'Archives',deb:'Archives',rpm:'Archives',
   };
   return extMap[(file.ext||'').toLowerCase()] || 'Other';
 }
@@ -627,6 +643,217 @@ async function buildPreview() {
   }
 }
 
+// ── Visual Before/After Tree (Sprint 11) ──────────────────────────────────
+
+/**
+ * Build a directory tree from a flat list of file paths.
+ * Returns { nodes: {}, rootFileCount, rootDirCount }
+ * Each node: { name, path, fileCount, subdirs: {name: node}, isDir, _count: number of files directly under }
+ */
+function buildDirTree(paths) {
+  var nodes = {};  // path → node
+  var rootFileCount = 0;
+  var rootDirCount = 0;
+
+  function getNode(path) {
+    if (nodes[path]) return nodes[path];
+    var parts = path.split('/').filter(Boolean);
+    var node = {
+      name: parts[parts.length - 1] || path,
+      path: path,
+      fileCount: 0,
+      subdirs: {},
+      isDir: false,
+      _directFiles: 0,
+    };
+    nodes[path] = node;
+    return node;
+  }
+
+  // Also track directories
+  var dirPaths = new Set();
+
+  paths.forEach(function(filePath) {
+    // filePath may be a file path. We want to count the parent dir's files.
+    var normalized = filePath.replace(/\\/g, '/');
+    var parts = normalized.split('/').filter(Boolean);
+    if (parts.length === 0) return;
+
+    // Count the file in its immediate parent dir
+    if (parts.length === 1) {
+      rootFileCount++;
+      return;
+    }
+    var parentParts = parts.slice(0, -1);
+    var parentPath = '/' + parentParts.join('/');
+    var parentNode = getNode(parentPath);
+    parentNode._directFiles++;
+    parentNode.fileCount++;
+
+    // Also increment all ancestors
+    for (var i = 1; i <= parentParts.length; i++) {
+      var ancestorPath = '/' + parentParts.slice(0, i).join('/');
+      if (nodes[ancestorPath]) nodes[ancestorPath].fileCount++;
+    }
+  });
+
+  // Build subdir hierarchy
+  Object.values(nodes).forEach(function(n) {
+    var parts = n.path.split('/').filter(Boolean);
+    if (parts.length > 1) {
+      var parentParts = parts.slice(0, -1);
+      var parentPath = '/' + parentParts.join('/');
+      var parentNode = getNode(parentPath);
+      var dirName = parts[parts.length - 1];
+      parentNode.subdirs[dirName] = n;
+    }
+  });
+
+  return { nodes: nodes, rootFileCount: rootFileCount, rootDirCount: rootDirCount };
+}
+
+function renderDirTreeNode(node, depth, maxDepth, showCounts) {
+  if (depth > maxDepth) return '';
+  var ind = depth * 16;
+  var hasKids = Object.keys(node.subdirs).length > 0;
+  var arrow = hasKids ? '&#9660;' : '&#9646;';
+  var color = depth === 0 ? 'var(--text)' : '#94a3b8';
+  var fontWeight = depth === 0 ? 'bold' : 'normal';
+  var fc = showCounts ? '<span style="color:#555;font-size:11px;margin-left:8px;white-space:nowrap">' + node.fileCount + ' files</span>' : '';
+  var h = '<div style="display:flex;align-items:center;padding:4px ' + ind + 'px;border-radius:4px">';
+  h += '<span style="color:#444;margin-right:4px;font-family:monospace;font-size:10px">' + arrow + '</span>';
+  h += '<span style="color:' + color + ';font-size:13px;font-weight:' + fontWeight + ';flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escHtml(node.path) + '">' + escHtml(node.name || node.path) + '</span>';
+  h += fc;
+  h += '</div>';
+  if (hasKids && depth < maxDepth) {
+    h += '<div style="display:block">';
+    Object.keys(node.subdirs).sort().forEach(function(k) {
+      h += renderDirTreeNode(node.subdirs[k], depth + 1, maxDepth, showCounts);
+    });
+    h += '</div>';
+  }
+  return h;
+}
+
+function renderBeforeAfterTree(actions) {
+  // Only show for move actions with a destination
+  var moveActions = actions.filter(function(a) {
+    return a.action === 'move' && a.dst && a.dst.trim();
+  });
+  if (moveActions.length === 0) return '';
+
+  // Extract source dirs and destination dirs
+  var srcDirs = new Set();
+  var dstDirs = new Set();
+  moveActions.forEach(function(a) {
+    var srcParts = a.src.split('/').filter(Boolean);
+    var dstParts = a.dst.split('/').filter(Boolean);
+    if (srcParts.length > 0) srcDirs.add('/' + srcParts.slice(0, -1).join('/'));
+    if (dstParts.length > 0) dstDirs.add('/' + dstParts.slice(0, -1).join('/'));
+  });
+
+  // Build before tree: source directories + files being moved out
+  var beforeSrcs = [];
+  moveActions.forEach(function(a) {
+    var parts = a.src.split('/').filter(Boolean);
+    if (parts.length > 0) beforeSrcs.push(parts[parts.length - 1] + '/ ← moved out');
+  });
+
+  // Collect unique source and destination directory trees
+  var allSrcDirs = [];
+  srcDirs.forEach(function(d) { allSrcDirs.push(d); });
+  var allDstDirs = [];
+  dstDirs.forEach(function(d) { allDstDirs.push(d); });
+
+  // Build simplified before tree from source directories
+  var beforeTree = buildDirTreeFromDirs(allSrcDirs);
+  // Build simplified after tree from destination directories (before state)
+  var afterTree = buildDirTreeFromDirs(allDstDirs);
+
+  // Count files per side
+  var movedCount = moveActions.length;
+  var beforeDirCount = allSrcDirs.length;
+  var afterDirCount = allDstDirs.length;
+
+  var html = '<div style="margin:16px 0 20px 0">';
+  html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">';
+  html += '<span style="font-size:13px;font-weight:bold;color:var(--text)">Tree Preview</span>';
+  html += '<span style="font-size:12px;color:var(--muted);background:rgba(255,255,255,0.06);padding:2px 10px;border-radius:12px">' + movedCount + ' file' + (movedCount !== 1 ? 's' : '') + ' to be moved</span>';
+  html += '</div>';
+
+  html += '<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:start">';
+
+  // LEFT: Before (current structure of affected directories)
+  html += '<div style="background:rgba(239,68,68,0.05);border:1px solid rgba(239,68,68,0.2);border-radius:8px;padding:10px;overflow:hidden">';
+  html += '<div style="font-size:11px;font-weight:bold;color:#ef4444;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.08em">&#8592; Before (current)</div>';
+  html += '<div style="font-size:11px;color:#555;margin-bottom:10px">' + beforeDirCount + ' dir' + (beforeDirCount !== 1 ? 's' : '') + ', ' + movedCount + ' file' + (movedCount !== 1 ? 's' : '') + ' affected</div>';
+  if (Object.keys(beforeTree.subdirs).length > 0) {
+    html += '<div style="max-height:240px;overflow-y:auto">';
+    Object.keys(beforeTree.subdirs).sort().forEach(function(k) {
+      html += renderDirTreeNode(beforeTree.subdirs[k], 0, 4, true);
+    });
+    html += '</div>';
+  } else {
+    html += '<div style="color:#555;font-size:12px;text-align:center;padding:16px 0">No source dirs</div>';
+  }
+  html += '</div>';
+
+  // Arrow divider
+  html += '<div style="display:flex;align-items:center;padding-top:40px">';
+  html += '<span style="font-size:20px;color:var(--accent)">&#10132;</span>';
+  html += '</div>';
+
+  // RIGHT: After (planned structure at destinations)
+  html += '<div style="background:rgba(34,197,94,0.05);border:1px solid rgba(34,197,94,0.2);border-radius:8px;padding:10px;overflow:hidden">';
+  html += '<div style="font-size:11px;font-weight:bold;color:#22c55e;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.08em">After &#8594; (planned)</div>';
+  html += '<div style="font-size:11px;color:#555;margin-bottom:10px">' + afterDirCount + ' dir' + (afterDirCount !== 1 ? 's' : '') + ' to receive files</div>';
+  if (Object.keys(afterTree.subdirs).length > 0) {
+    html += '<div style="max-height:240px;overflow-y:auto">';
+    Object.keys(afterTree.subdirs).sort().forEach(function(k) {
+      html += renderDirTreeNode(afterTree.subdirs[k], 0, 4, true);
+    });
+    html += '</div>';
+  } else {
+    html += '<div style="color:#555;font-size:12px;text-align:center;padding:16px 0">No destination dirs</div>';
+  }
+  html += '</div>';
+
+  html += '</div></div>';
+
+  return html;
+}
+
+/**
+ * Build a minimal tree from a list of absolute directory paths.
+ * Each path like /Images/2024/03 becomes a tree node.
+ */
+function buildDirTreeFromDirs(dirPaths) {
+  var root = { name: '/', path: '/', fileCount: 0, subdirs: {}, _directFiles: 0 };
+
+  dirPaths.forEach(function(dirPath) {
+    var normalized = dirPath.replace(/\\/g, '/').replace(/\\/g, '/');
+    var parts = normalized.split('/').filter(Boolean);
+    if (parts.length === 0) return;
+
+    var current = root;
+    parts.forEach(function(part) {
+      if (!current.subdirs[part]) {
+        var nodePath = '/' + parts.slice(0, parts.indexOf(part) + 1).join('/');
+        current.subdirs[part] = {
+          name: part,
+          path: nodePath,
+          fileCount: 0,
+          subdirs: {},
+          _directFiles: 0,
+        };
+      }
+      current = current.subdirs[part];
+    });
+  });
+
+  return root;
+}
+
 function renderPreview(stats) {
   const container = document.getElementById('preview-content');
   if (!container) return;
@@ -740,7 +967,7 @@ function renderPreview(stats) {
     '<div class="stat-card"><div class="stat-value text-muted">' + (stats ? (stats.skips || 0) : state.actionPlan.filter(function(a){return a.action==='skip';}).length) + '</div><div class="stat-label">Skip</div></div>' +
     '</div>';
 
-  container.innerHTML = simBanner + statsHtml + groupsHtml;
+  container.innerHTML = simBanner + statsHtml + renderBeforeAfterTree(state.actionPlan) + groupsHtml;
 
   // Collapsed by default for large groups
   ['blocked', 'unknown', 'skipped'].forEach(function(gKey) {
@@ -2278,6 +2505,24 @@ async function syncScopeModeFromProfile(profileId) {
         if (!profile) return;
         var allowed = profile.allowed_scope_modes || [];
         var defaultSm = profile.default_scope_mode || "preserve_parent_boundaries";
+        var labels = profile.scope_labels || {};
+
+        // PROF-011: Update user-facing labels from profile's scope_labels
+        var globalLabel = labels["global_organize"] || "🌍 Organize across all folders";
+        var preserveLabel = labels["preserve_parent_boundaries"] || "📂 Keep files inside each folder";
+        var projectLabel = labels["project_safe_mode"] || "🛡️ Protect detected projects";
+        document.querySelectorAll('.scope-label-global').forEach(function(el) { el.textContent = globalLabel; });
+        document.querySelectorAll('.scope-label-preserve').forEach(function(el) { el.textContent = preserveLabel; });
+        document.querySelectorAll('.scope-label-project').forEach(function(el) { el.textContent = projectLabel; });
+        // Hint paragraph — update bold labels
+        var hintEl = document.getElementById('scope-mode-hint');
+        if (hintEl) {
+            hintEl.innerHTML =
+                '<strong class="scope-hint-global">' + escHtml(globalLabel) + '</strong>: files can go anywhere under the scan folder. &nbsp;' +
+                '<strong class="scope-hint-preserve">' + escHtml(preserveLabel) + '</strong>: files only move within the folder you selected. &nbsp;' +
+                '<strong class="scope-hint-project">' + escHtml(projectLabel) + '</strong>: files inside project folders won\'t be moved out.';
+        }
+
         // Hide scope mode options not allowed for this profile
         document.querySelectorAll('input[name="scope_mode"]').forEach(function(radio) {
             var label = radio.closest('label');

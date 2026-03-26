@@ -152,24 +152,24 @@
           <div id="profile-info-banner" style="display:none;margin-top:10px;padding:10px 14px;border-radius:8px;font-size:13px;font-weight:bold"></div>
         </div>
 
-        <!-- Scope Mode -->
+        <!-- Scope Mode (PROF-011: labels updated dynamically via scope_labels from profile) -->
         <div style="margin-bottom:16px">
           <div style="color:var(--text);font-size:13px;font-weight:bold;margin-bottom:8px">Intent Scope</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap" id="scope-mode-selector">
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);font-size:13px;color:var(--text)">
-              <input type="radio" name="scope_mode" value="global_organize" id="sm-global"> 🌍 Move files anywhere
+            <label data-scope="global_organize" style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);font-size:13px;color:var(--text)">
+              <input type="radio" name="scope_mode" value="global_organize" id="sm-global"> <span class="scope-label-global">🌍 Organize across all folders</span>
             </label>
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);font-size:13px;color:var(--text)">
-              <input type="radio" name="scope_mode" value="preserve_parent_boundaries" id="sm-preserve" checked> 📂 Stay in selected folder
+            <label data-scope="preserve_parent_boundaries" style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);font-size:13px;color:var(--text)">
+              <input type="radio" name="scope_mode" value="preserve_parent_boundaries" id="sm-preserve" checked> <span class="scope-label-preserve">📂 Keep files inside each folder</span>
             </label>
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);font-size:13px;color:var(--text)">
-              <input type="radio" name="scope_mode" value="project_safe_mode" id="sm-project"> 🛡️ Keep project files safe
+            <label data-scope="project_safe_mode" style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);font-size:13px;color:var(--text)">
+              <input type="radio" name="scope_mode" value="project_safe_mode" id="sm-project"> <span class="scope-label-project">🛡️ Protect detected projects</span>
             </label>
           </div>
-          <div class="text-sm text-muted" style="margin-top:6px">
-            <strong>Move anywhere</strong>: files can go anywhere under the scan folder. &nbsp;
-            <strong>Stay in folder</strong>: files only move within the folder you selected. &nbsp;
-            <strong>Keep safe</strong>: files inside project folders (code repos, etc.) won't be moved out.
+          <div class="text-sm text-muted" style="margin-top:6px" id="scope-mode-hint">
+            <strong class="scope-hint-global">Organize across all folders</strong>: files can go anywhere under the scan folder. &nbsp;
+            <strong class="scope-hint-preserve">Keep files inside each folder</strong>: files only move within the folder you selected. &nbsp;
+            <strong class="scope-hint-project">Protect detected projects</strong>: files inside project folders (code repos, etc.) won't be moved out.
           </div>
         </div>
 

@@ -808,6 +808,7 @@ async def api_get_profiles():
             "name": p.name,
             "description": p.description,
             "icon": p.icon,
+            "scope_labels": p.scope_labels,  # PROF-011: user-facing scope mode labels
             "allowed_scope_modes": p.allowed_scope_modes,
             "default_scope_mode": p.default_scope_mode,
         }
