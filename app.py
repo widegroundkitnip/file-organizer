@@ -221,8 +221,8 @@ class DuplicateConsolidateResponse(BaseModel):
 @app.post("/api/scan")
 async def api_scan(req: ScanRequest):
     """Scan a directory using ManifestScanner (canonical scanner) directly.
-    
-    No subprocess, no disk artifact — fully in-process.
+
+    Runs in-process and returns both a durable scan id and a concrete manifest file path.
     """
     global _scan_progress_state
 
@@ -299,6 +299,16 @@ async def api_scan(req: ScanRequest):
             ]
 
             total_files = manifest.get("scan_meta", {}).get("total_files", 0)
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".json",
+                delete=False,
+                prefix="fo_manifest_",
+                encoding="utf-8",
+            ) as f:
+                json.dump(manifest, f)
+                temp_manifest_path = f.name
+
             manifest_path = SCANS_DIR / f"{manifest_id}.json"
             with open(manifest_path, "w", encoding="utf-8") as f:
                 json.dump(manifest, f, indent=2, ensure_ascii=False)
@@ -308,7 +318,7 @@ async def api_scan(req: ScanRequest):
 
             return {
                 "status": "ok",
-                "manifest_path": manifest_id,
+                "manifest_path": temp_manifest_path,
                 "manifest_id": manifest_id,
                 "total_files": total_files,
                 "manifest": manifest,
@@ -331,7 +341,11 @@ async def api_scan(req: ScanRequest):
             with _scan_progress_lock:
                 _scan_progress_state["running"] = False
                 _scan_progress_state["phase"] = "cancelled"
+                _scan_progress_state["manifest_path"] = None
+                _scan_progress_state["manifest_id"] = None
+                _scan_progress_state["total_files"] = 0
                 _scan_progress_state["error"] = "Scan cancelled"
+                _scan_progress_state["cancel_event"] = None
             raise HTTPException(status_code=499, detail="Scan cancelled")
 
         with _scan_progress_lock:
@@ -341,6 +355,7 @@ async def api_scan(req: ScanRequest):
             _scan_progress_state["manifest_id"] = result["manifest_id"]
             _scan_progress_state["total_files"] = result["total_files"]
             _scan_progress_state["error"] = None
+            _scan_progress_state["cancel_event"] = None
 
         return result
 
@@ -349,8 +364,9 @@ async def api_scan(req: ScanRequest):
     except Exception as e:
         with _scan_progress_lock:
             _scan_progress_state["running"] = False
-            _scan_progress_state["phase"] = "done"
+            _scan_progress_state["phase"] = "error"
             _scan_progress_state["error"] = str(e)
+            _scan_progress_state["cancel_event"] = None
         raise HTTPException(status_code=500, detail=f"Scan error: {e}")
 
 
@@ -377,12 +393,15 @@ async def api_scan_status():
 async def api_scan_cancel():
     """Cancel the currently running scan."""
     with _scan_progress_lock:
-        state = dict(_scan_progress_state)
-    if not state["running"]:
-        return {"ok": False, "reason": "No scan in progress"}
-    cancel_event = state.get("cancel_event")
-    if cancel_event:
-        cancel_event.set()
+        if not _scan_progress_state["running"]:
+            return {"ok": False, "reason": "No scan in progress"}
+        cancel_event = _scan_progress_state.get("cancel_event")
+        if cancel_event:
+            cancel_event.set()
+        _scan_progress_state["running"] = False
+        _scan_progress_state["phase"] = "cancelled"
+        _scan_progress_state["error"] = "Scan cancelled"
+        _scan_progress_state["cancel_event"] = None
     return {"ok": True}
 
 
@@ -513,6 +532,11 @@ async def api_get_rules():
     from planner import RuleManager
     rm = RuleManager(str(BASE_DIR / "rules.json"))
     return {"rules": [r.to_dict() for r in rm.rules]}
+
+
+@app.get("/api/rules/status")
+async def api_rules_status():
+    return {"ok": True, "statuses": []}
 
 
 @app.put("/api/rules")
