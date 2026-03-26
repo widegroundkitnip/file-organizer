@@ -30,6 +30,7 @@ const state = {
   scanPath: '',
   scanAbortController: null,
   scanCancelRequested: false,
+  scanPollInterval: null,
 };
 
 window.lastCrossPathData = null;
@@ -200,7 +201,10 @@ async function api(method, endpoint, body, options = {}) {
   const res = await fetch(`/api${endpoint}`, opts);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    const error = new Error(err.detail || `HTTP ${res.status}`);
+    error.status = res.status;
+    error.detail = err.detail || res.statusText;
+    throw error;
   }
   return res.json();
 }
@@ -279,6 +283,51 @@ function showAlert(containerId, type, msg) {
   if (!el) return;
   el.innerHTML = `<div class="alert alert-${type}">${escHtml(msg)}</div>`;
   setTimeout(() => { if (el) el.innerHTML = ''; }, 6000);
+}
+
+function clearScanPollInterval() {
+  if (state.scanPollInterval) {
+    clearInterval(state.scanPollInterval);
+    state.scanPollInterval = null;
+  }
+}
+
+function updateScanProgress(status) {
+  const progressBar = document.querySelector('#scan-progress .progress-bar');
+  const statusEl = document.getElementById('scan-status');
+  const filesFoundRaw = Number(status && status.files_found || 0);
+  const totalFilesRaw = Number(status && status.total_files || 0);
+  const phase = status && status.phase ? status.phase : 'scanning';
+  const filesFound = filesFoundRaw.toLocaleString();
+  const totalFiles = totalFilesRaw.toLocaleString();
+
+  if (statusEl) {
+    if (totalFilesRaw > 0) {
+      statusEl.textContent = `${phase} - ${filesFound} / ${totalFiles} files`;
+    } else {
+      statusEl.textContent = `${phase} - ${filesFound} files`;
+    }
+  }
+
+  if (progressBar) {
+    let width = 0;
+    if (totalFilesRaw > 0) {
+      width = Math.max(0, Math.min(100, (filesFoundRaw / totalFilesRaw) * 100));
+    } else if (filesFoundRaw > 0) {
+      width = 8;
+    }
+    progressBar.style.width = `${width}%`;
+  }
+}
+
+function showScanResetAlert(message) {
+  const el = document.getElementById('scan-alert');
+  if (!el) return;
+  el.innerHTML =
+    '<div class="alert alert-warning">' +
+    '<div>' + escHtml(message) + '</div>' +
+    '<button class="btn btn-secondary" style="margin-top:10px" onclick="resetScanState()">Reset Scan State</button>' +
+    '</div>';
 }
 
 function escHtml(s) {
@@ -404,8 +453,10 @@ async function startScan() {
   const stopBtn = document.getElementById('btn-stop-scan');
   const progress = document.getElementById('scan-progress');
   const statusEl = document.getElementById('scan-status');
+  const progressBar = document.querySelector('#scan-progress .progress-bar');
   const controller = new AbortController();
 
+  clearScanPollInterval();
   state.scanAbortController = controller;
   state.scanCancelRequested = false;
 
@@ -418,6 +469,7 @@ async function startScan() {
   }
   if (progress) progress.classList.remove('hidden');
   if (statusEl) statusEl.textContent = 'Scanning…';
+  if (progressBar) progressBar.style.width = '0%';
 
   try {
     console.log('[scan] POST /api/scan payload', {
@@ -430,34 +482,16 @@ async function startScan() {
       mode: state.scanMode,
       include_hidden: document.getElementById('include-hidden')?.checked || false,
     }, { signal: controller.signal });
-    let polling = true;
-    const pollPromise = (async function pollScanStatus() {
-      while (polling) {
-        try {
-          const scanStatus = await api('GET', '/scan/status');
-          if (statusEl && scanStatus) {
-            const filesFound = Number(scanStatus.files_found || 0).toLocaleString();
-            const phase = scanStatus.phase || 'scanning';
-            statusEl.textContent = scanStatus.running
-              ? `Scanning… ${filesFound} files (${phase})`
-              : `Finalizing scan… ${filesFound} files`;
-          }
-        } catch (pollError) {
-          console.warn('[scan] status polling failed:', pollError.message);
-        }
-
-        const scanDone = await Promise.race([
-          scanPromise.then(() => true).catch(() => true),
-          new Promise(resolve => setTimeout(() => resolve(false), 500)),
-        ]);
-        if (scanDone) {
-          polling = false;
-        }
+    state.scanPollInterval = setInterval(async function pollScanStatus() {
+      try {
+        const scanStatus = await api('GET', '/scan/status');
+        updateScanProgress(scanStatus);
+      } catch (pollError) {
+        console.warn('[scan] status polling failed:', pollError.message);
       }
-    })();
+    }, 1000);
     const result = await scanPromise;
-    polling = false;
-    await pollPromise;
+    clearScanPollInterval();
     console.log('[scan] /api/scan response', result);
 
     state.manifestPath = result.manifest_path || result.manifest_id;
@@ -469,20 +503,29 @@ async function startScan() {
     state.tier2 = result.tier2 || manifest.tier2 || [];
     state.tier3 = result.tier3 || manifest.tier3 || [];
 
-    if (statusEl) statusEl.textContent = `✓ Found ${result.total_files.toLocaleString()} files`;
+    updateScanProgress({
+      phase: 'done',
+      files_found: result.total_files || 0,
+      total_files: result.total_files || 0,
+    });
     showAlert('scan-alert', 'success', `Scan complete — ${result.total_files.toLocaleString()} files found.`);
 
     await loadScans();
     navigate('results');
   } catch(e) {
+    clearScanPollInterval();
     if (e && (e.name === 'AbortError' || state.scanCancelRequested)) {
       console.log('[scan] scan cancelled', e.message || e.name);
       showAlert('scan-alert', 'warning', 'Scan cancelled.');
-      if (statusEl) statusEl.textContent = 'Scan cancelled.';
+      updateScanProgress({ phase: 'cancelled', files_found: 0, total_files: 0 });
+    } else if (e && e.status === 409) {
+      showScanResetAlert(e.message || 'Scan already in progress.');
+      updateScanProgress({ phase: 'conflict', files_found: 0, total_files: 0 });
     } else {
       showAlert('scan-alert', 'error', `Scan failed: ${e.message}`);
     }
   } finally {
+    clearScanPollInterval();
     state.scanAbortController = null;
     state.scanCancelRequested = false;
     btn.disabled = false;
@@ -516,6 +559,7 @@ async function stopScan() {
   } catch (e) {
     console.warn('[scan] cancel request failed:', e.message);
   } finally {
+    clearScanPollInterval();
     controller.abort();
     state.scanAbortController = null;
     state.scanCancelRequested = false;
@@ -523,6 +567,19 @@ async function stopScan() {
     const stopBtn = document.getElementById('btn-stop-scan');
     if (btn) { btn.disabled = false; btn.innerHTML = '🔍 Start Scan'; }
     if (stopBtn) { stopBtn.classList.add('hidden'); }
+  }
+}
+
+async function resetScanState() {
+  try {
+    await api('POST', '/scan/reset');
+    clearScanPollInterval();
+    state.scanAbortController = null;
+    state.scanCancelRequested = false;
+    updateScanProgress({ phase: 'idle', files_found: 0, total_files: 0 });
+    showAlert('scan-alert', 'success', 'Scan state reset.');
+  } catch (e) {
+    showAlert('scan-alert', 'error', `Reset failed: ${e.message}`);
   }
 }
 
@@ -831,8 +888,12 @@ async function buildPreview() {
     return;
   }
   if (!state.manifestPath) {
-    showAlert('preview-alert', 'error', 'Cannot determine manifest path. Re-run the scan.');
-    return;
+    if (state.scans && state.scans.length > 0 && state.scans[0] && state.scans[0].id) {
+      state.manifestPath = state.scans[0].id;
+    } else {
+      showAlert('preview-alert', 'error', 'Cannot determine manifest path. Re-run the scan.');
+      return;
+    }
   }
 
   const btn = document.getElementById('btn-preview');
@@ -2131,14 +2192,20 @@ async function browseForFolder(targetInputId) {
 
 async function browseFolder(targetId) {
     try {
-        const res = await fetch('/api/browse');
-        const data = await res.json();
+        const data = await api('GET', '/browse');
         if (data.ok && data.path) {
             console.log('[scan] browseFolder resolved path', { targetId, path: data.path });
             setSelectedPath(targetId, data.path);
             return;
         }
-    } catch(e) {}
+        throw new Error(data.error || 'Folder picker did not return a path.');
+    } catch(e) {
+        var manualPath = prompt("Native folder picker failed. Enter the full path manually:");
+        if (manualPath && manualPath.trim()) {
+            setSelectedPath(targetId, manualPath.trim());
+            return;
+        }
+    }
     var picker = document.getElementById(targetId + '-picker') || document.getElementById('scan-path-picker');
     if (picker) picker.click();
 }
@@ -2688,8 +2755,18 @@ function selectProfile(profileId) {
     updateIntentScopeVisibility();
     // Sync scope_mode from profile
     syncScopeModeFromProfile(profileId);
-    // BUG-013/014: calling generateProfileRules on profile selection and showing results
-    generateProfileRules(profileId);
+    var applyBtn = document.getElementById("btn-apply-profile");
+    if (applyBtn) {
+        applyBtn.disabled = !profileId;
+    }
+}
+
+async function applySelectedProfile() {
+    if (!state.selectedProfile) {
+        showAlert("scan-alert", "warning", "Select a profile first.");
+        return;
+    }
+    await generateProfileRules(state.selectedProfile);
 }
 
 async function syncScopeModeFromProfile(profileId) {

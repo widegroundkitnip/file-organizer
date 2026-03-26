@@ -595,13 +595,7 @@ input[type="checkbox"] {
   background: linear-gradient(90deg, var(--primary), var(--accent));
   border-radius: 999px;
   transition: width 300ms ease;
-  background-size: 200% 100%;
-  animation: progressAnim 1.5s linear infinite;
-}
-
-@keyframes progressAnim {
-  0%   { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+  width: 0;
 }
 
 /* ── Rules editor ── */

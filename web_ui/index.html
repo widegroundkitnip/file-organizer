@@ -147,8 +147,11 @@
         <!-- Run Profile -->
         <div style="margin-bottom:16px">
           <div style="color:var(--text);font-size:13px;font-weight:bold;margin-bottom:8px">Run Profile</div>
-          <div class="text-sm text-muted" style="margin-bottom:10px">Profiles generate rules that decide where files go. Rules start <strong>disabled</strong> — go to Rules to enable what you need after scanning.</div>
+          <div class="text-sm text-muted" style="margin-bottom:10px">Select a profile, then apply it when you actually want its rules. Rules start <strong>disabled</strong> — go to Rules to enable what you need after scanning.</div>
           <div style="display:flex;gap:10px;flex-wrap:wrap" id="profile-selector"></div>
+          <div style="margin-top:10px">
+            <button class="btn btn-secondary" id="btn-apply-profile" onclick="applySelectedProfile()" disabled>Apply Profile</button>
+          </div>
           <div id="profile-info-banner" style="display:none;margin-top:10px;padding:10px 14px;border-radius:8px;font-size:13px;font-weight:bold"></div>
         </div>
 
@@ -179,7 +182,7 @@
         </div>
 
         <div id="scan-progress" class="hidden" style="margin-top:14px">
-          <div class="progress-wrap"><div class="progress-bar" style="width:100%"></div></div>
+          <div class="progress-wrap"><div class="progress-bar"></div></div>
           <div class="text-sm text-muted" id="scan-status" style="margin-top:6px">Scanning…</div>
         </div>
       </div>
