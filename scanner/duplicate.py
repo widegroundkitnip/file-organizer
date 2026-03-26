@@ -43,6 +43,136 @@ def size_similar(size1: int, size2: int, tolerance_pct: float = 0.05) -> bool:
     return (max_s - min_s) / max_s <= tolerance_pct
 
 
+def recommend_keeper(files: list) -> dict:
+    """
+    SPRINT-10: Recommend the best keeper file from a duplicate group.
+
+    Scoring factors (per LOCKED spec):
+    - Newest modified time (highest weight)
+    - Largest file size
+    - Richest metadata (has EXIF, camera info, etc.)
+    - Preferred folder/root (outside temp/trash)
+    - Shortest/cleanest path
+
+    Returns:
+        keeper_path (str)
+        reason (str)
+        scores (dict of path -> score breakdown)
+    """
+    if not files:
+        return {"keeper_path": "", "reason": "No files in group", "scores": {}}
+
+    # Normalize to dict form
+    def to_dict(f) -> dict:
+        if isinstance(f, dict):
+            return f
+        return {
+            "path": getattr(f, "path", ""),
+            "name": getattr(f, "name", ""),
+            "size_bytes": getattr(f, "size_bytes", 0),
+            "mtime": getattr(f, "mtime", 0.0),
+            "ctime": getattr(f, "ctime", 0.0),
+            "relative_path": getattr(f, "relative_path", ""),
+            "parent_tree": getattr(f, "parent_tree", ""),
+            "extension": getattr(f, "ext") or getattr(f, "extension", ""),
+            "classification": getattr(f, "classification", "known"),
+        }
+
+    scored: list[tuple[str, float, str]] = []  # (path, score, reason)
+
+    # Collect scores per file
+    all_scores: dict[str, dict] = {}
+    for f in files:
+        d = to_dict(f)
+        path = d["path"]
+        scores: dict[str, float] = {}
+
+        # 1. Modified time score (0–1, newest = 1.0)
+        mtime = d.get("mtime", 0.0)
+        scores["modified_time"] = mtime  # raw mtime
+
+        # 2. Size score — largest wins normalization
+        size = d.get("size_bytes", 0)
+        scores["size"] = size
+
+        # 3. Path cleanliness score (fewer path segments = cleaner, prefer short)
+        rel = d.get("relative_path", "")
+        depth = rel.count("/") + (1 if rel else 0)
+        scores["path_depth"] = depth  # lower = cleaner
+
+        # 4. Location quality: outside temp/trash = better
+        path_lower = path.lower()
+        in_temp = any(
+            seg in path_lower
+            for seg in ("/tmp/", "/temp/", "temp\\", "trash", "/trash/")
+        )
+        scores["location_quality"] = 0.0 if in_temp else 1.0
+
+        # 5. Preferred root/folder: prefer files that are in a structured tree vs deep nested
+        tree = d.get("parent_tree", "")
+        scores["has_tree"] = 1.0 if tree else 0.0
+
+        all_scores[path] = scores
+
+    # Normalize each factor to 0–1 and compute weighted total
+    if not all_scores:
+        return {"keeper_path": files[0]["path"] if isinstance(files[0], dict) else str(files[0]), "reason": "Single file", "scores": {}}
+
+    max_mtime = max(s.get("modified_time", 0) for s in all_scores.values())
+    max_size = max(s.get("size", 0) for s in all_scores.values())
+    max_depth = max(s.get("path_depth", 1) for s in all_scores.values()) or 1
+
+    # Weights per LOCKED spec
+    WEIGHTS = {
+        "modified_time": 0.30,
+        "size": 0.20,
+        "path_depth": 0.15,
+        "location_quality": 0.20,
+        "has_tree": 0.15,
+    }
+
+    totals: dict[str, float] = {}
+    for path, scores in all_scores.items():
+        mtime_norm = scores["modified_time"] / max_mtime if max_mtime > 0 else 0.0
+        size_norm = scores["size"] / max_size if max_size > 0 else 0.0
+        depth_norm = 1.0 - (scores["path_depth"] / max_depth) if max_depth > 0 else 1.0
+        location_norm = scores["location_quality"]
+        tree_norm = scores["has_tree"]
+
+        total = (
+            WEIGHTS["modified_time"] * mtime_norm
+            + WEIGHTS["size"] * size_norm
+            + WEIGHTS["path_depth"] * depth_norm
+            + WEIGHTS["location_quality"] * location_norm
+            + WEIGHTS["has_tree"] * tree_norm
+        )
+        totals[path] = total
+
+    keeper_path = max(totals, key=lambda p: totals[p])
+
+    # Build human-readable reason
+    kscores = all_scores[keeper_path]
+    reasons: list[str] = []
+    if kscores["modified_time"] == max_mtime and max_mtime > 0:
+        reasons.append("newest modified time")
+    if kscores["size"] == max_size and max_size > 0:
+        reasons.append("largest file")
+    if kscores["location_quality"] == 1.0:
+        reasons.append("outside temp/trash")
+    if kscores["path_depth"] == 0:
+        reasons.append("shortest path")
+    if kscores["has_tree"] == 1.0:
+        reasons.append("inside organized folder")
+    if not reasons:
+        reasons.append("best overall score")
+
+    return {
+        "keeper_path": keeper_path,
+        "reason": "Recommended: " + ", ".join(reasons),
+        "scores": {p: round(totals[p], 4) for p in totals},
+    }
+
+
 def find_similar_duplicates(
     files: list,
     similarity_threshold: float = 0.75,
@@ -106,6 +236,8 @@ class DuplicateGroup:
         return f[attr] if isinstance(f, dict) else getattr(f, attr)
 
     def to_dict(self) -> dict:
+        # SPRINT-10: include keeper recommendation
+        rec = recommend_keeper(self.files)
         return {
             "group_id": self.group_id,
             "tier": self.tier,
@@ -114,6 +246,11 @@ class DuplicateGroup:
             "trees": list(set(self._attr(f, "parent_tree") for f in self.files)),
             "total_size": sum(self._attr(f, "size_bytes") for f in self.files),
             "wasted_space": sum(self._attr(f, "size_bytes") for f in self.files[1:]),
+            # SPRINT-10: keeper recommendation
+            "keeper_recommendation": {
+                "keeper_path": rec["keeper_path"],
+                "reason": rec["reason"],
+            },
         }
 
     def _shared_subpath(self) -> str:
@@ -221,6 +358,8 @@ class CrossPathDuplicateFinder:
         }
 
     def _serialize_group(self, group: DuplicateGroup) -> dict:
+        # SPRINT-10: include keeper recommendation
+        rec = recommend_keeper(group.files)
         files = [self._to_file_dict(f) for f in group.files]
         return {
             "group_id": group.group_id,
@@ -230,12 +369,26 @@ class CrossPathDuplicateFinder:
             "trees": list(set(self._get(f, "parent_tree") for f in group.files)),
             "total_size": sum(self._get(f, "size_bytes") for f in group.files),
             "wasted_space": sum(self._get(f, "size_bytes") for f in group.files[1:]),
+            # SPRINT-10: keeper recommendation
+            "keeper_recommendation": {
+                "keeper_path": rec["keeper_path"],
+                "reason": rec["reason"],
+            },
         }
 
     def _build_result(self) -> dict:
         tier1 = [self._serialize_group(g) for g in self.tier1_groups]
         tier2 = [self._serialize_group(g) for g in self.tier2_groups]
-        tier3 = self.tier3_groups
+        # SPRINT-10: add keeper recommendation to Tier 3 similar groups
+        tier3 = []
+        for g in self.tier3_groups:
+            rec = recommend_keeper(g.get("files", []))
+            g_copy = dict(g)
+            g_copy["keeper_recommendation"] = {
+                "keeper_path": rec["keeper_path"],
+                "reason": rec["reason"],
+            }
+            tier3.append(g_copy)
         duplicate_groups = tier1 + tier2 + tier3
         return {
             "tier1": tier1,

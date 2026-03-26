@@ -71,20 +71,66 @@ function navigate(page) {
       el.innerHTML = "<div class=\"alert alert-info\">Run a Cross-Path scan first to see duplicates.</div>";
     } else {
       var dupGroups = data.duplicates;
+      var tier1 = dupGroups.filter(function(g) { return g.tier === "exact"; });
+      var tier2 = dupGroups.filter(function(g) { return g.tier === "likely"; });
+      var tier3 = dupGroups.filter(function(g) { return g.tier === "similar"; });
+
       var html = "<div style=\"margin-bottom:16px;color:var(--text)\"><strong>" + dupGroups.length + "</strong> duplicate group(s)</div>";
-      dupGroups.forEach(function(group, idx) {
+
+      // Sprint-10: Tier 1 & 2 groups get a "Review" button
+      var reviewable = tier1.concat(tier2);
+      if (reviewable.length > 0) {
+        html += "<div style=\"margin-bottom:12px\">";
+        html += "<button onclick=\"showDuplicateReviewAll(" + reviewable.length + ")\" style=\"background:var(--accent);color:white;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:bold\">🔍 Review All Groups (" + reviewable.length + ")</button>";
+        html += "</div>";
+      }
+
+      reviewable.forEach(function(group, idx) {
         var tier = group.tier || "likely";
-        html += "<div class=\"duplicate-group\" data-tier=\"" + escHtml(tier) + "\" style=\"background:var(--surface);border:1px solid #333;border-radius:8px;padding:12px;margin-bottom:12px\">";
-        html += "<div style=\"color:var(--warning);margin-bottom:8px\">Group " + (idx+1) + " -- " + group.files.length + " files</div>";
+        var tierLabel = tier === "exact" ? "Exact" : "Likely";
+        var rec = group.keeper_recommendation || {};
+        var keeperPath = rec.keeper_path || "";
+        html += "<div class=\"duplicate-group\" data-tier=\"" + escHtml(tier) + "\" data-group-id=\"" + group.group_id + "\" style=\"background:var(--surface);border:1px solid #333;border-radius:8px;padding:12px;margin-bottom:12px\">";
+        html += "<div style=\"display:flex;align-items:center;gap:8px;margin-bottom:8px\">";
+        html += "<span style=\"color:var(--warning);font-weight:bold\">" + tierLabel + " — Group " + (idx+1) + " — " + group.files.length + " files</span>";
+        if (keeperPath) {
+          html += "<span style=\"color:#666;font-size:12px;flex:1\">★ Keeper: <span title=\"" + escHtml(keeperPath) + "\" style=\"color:var(--text)\">" + escHtml(keeperPath.split("/").pop()) + "</span></span>";
+        }
+        html += "<button onclick=\"openDuplicateReview(" + group.group_id + ",'" + escHtml(tier) + "')\" style=\"background:var(--accent);color:white;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:bold\">🔍 Review</button>";
+        html += "</div>";
+        if (rec.reason) {
+          html += "<div style=\"color:#888;font-size:11px;margin-bottom:6px;padding:4px 8px;background:rgba(255,255,255,0.04);border-radius:4px\">" + escHtml(rec.reason) + "</div>";
+        }
         group.files.forEach(function(f) {
+          var isKeeper = f.path === keeperPath;
           html += "<div style=\"padding:4px 0;border-bottom:1px solid #222;font-size:13px;word-break:break-all;display:flex;align-items:center;gap:6px\">";
-          html += "<span style=\"color:var(--text);flex:1;word-break:break-all\">" + escHtml(f.path) + "</span>";
+          if (isKeeper) {
+            html += "<span style=\"color:var(--success);font-size:11px;white-space:nowrap\">★ KEEP</span>";
+          } else {
+            html += "<span style=\"color:#555;font-size:11px;white-space:nowrap\">— dup</span>";
+          }
+          html += "<span style=\"color:var(--text);flex:1;word-break:break-all" + (isKeeper ? ";font-weight:600" : "") + "\">" + escHtml(f.path) + "</span>";
           html += "<span style=\"color:#666;white-space:nowrap\">" + fmtSize(f.size) + "</span>";
-          html += "<button onclick=\"openFolder(\'" + escHtml(f.path) + "\')\" style=\"background:rgba(255,255,255,0.08);border:none;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;color:var(--text);white-space:nowrap\" title=\"Open containing folder\">📁 Open folder</button>";
+          html += "<button onclick=\"openFolder(\'" + escHtml(f.path) + "\')\" style=\"background:rgba(255,255,255,0.08);border:none;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;color:var(--text);white-space:nowrap\" title=\"Open containing folder\">📁</button>";
           html += "</div>";
         });
         html += "</div>";
       });
+
+      // Tier 3 similar — informational only
+      if (tier3.length > 0) {
+        html += "<div style=\"margin-top:24px;color:var(--text)\"><strong>Similar (Tier 3) — review not required</strong></div>";
+        tier3.forEach(function(group, idx) {
+          var pct = Math.round((group.similarity || 0) * 100);
+          html += "<div class=\"duplicate-group\" data-tier=\"similar\" style=\"background:var(--surface);border:1px solid #333;border-radius:8px;padding:12px;margin-top:8px\">";
+          html += "<div style=\"color:var(--info);margin-bottom:8px\">Group " + (idx+1) + " (" + pct + "% similar) — " + group.files.length + " files</div>";
+          group.files.forEach(function(f) {
+            html += "<div style=\"padding:4px 0;border-bottom:1px solid #222;font-size:13px;word-break:break-all\">" + escHtml(f.path) + " <span style=\"color:#666\">" + fmtSize(f.size) + "</span></div>";
+          });
+          html += "</div>";
+        });
+      }
+
       el.innerHTML = html;
     }
   }
@@ -1311,6 +1357,227 @@ async function runCrossPathScan() {
     }
   } catch(err) {
     resultsDiv.innerHTML = "<div class=\"alert alert-error\">Error: " + escHtml(err.message) + "</div>";
+  }
+}
+
+// ── Sprint 10: Duplicate Review ───────────────────────────────────────────────
+
+// Global review state
+window._dupReviewState = {
+  groups: [],  // all Tier1+Tier2 groups with keeper recommendations
+  currentIndex: -1,
+  currentReview: null,  // detailed review from /api/duplicates/review
+};
+
+function showDuplicateReviewAll(count) {
+  // Build index of reviewable groups from lastCrossPathData
+  var data = window.lastCrossPathData;
+  if (!data || !data.duplicates) return;
+  var reviewable = data.duplicates.filter(function(g) { return g.tier === "exact" || g.tier === "likely"; });
+  window._dupReviewState.groups = reviewable;
+  window._dupReviewState.currentIndex = 0;
+  openDuplicateReviewByIndex(0);
+}
+
+function openDuplicateReviewByIndex(idx) {
+  var groups = window._dupReviewState.groups;
+  if (idx < 0 || idx >= groups.length) {
+    // All done
+    showAlert("preview-alert", "success", "Duplicate review complete! " + groups.length + " group(s) reviewed.");
+    // Refresh the duplicates view
+    if (typeof navigate === "function") navigate("duplicates");
+    return;
+  }
+  var group = groups[idx];
+  openDuplicateReview(group.group_id, group.tier);
+}
+
+function openDuplicateReview(groupId, tier) {
+  var data = window.lastCrossPathData;
+  if (!data || !data.duplicates) return;
+  var group = data.duplicates.find(function(g) { return g.group_id === groupId && g.tier === tier; });
+  if (!group) return;
+
+  // Build files array from group
+  var files = (group.files || []).map(function(f) {
+    // f may be a string (path) or an object
+    if (typeof f === "string") {
+      return { path: f, size: 0, mtime: 0 };
+    }
+    return {
+      path: f.path || f,
+      size: f.size || f.size_bytes || 0,
+      size_bytes: f.size || f.size_bytes || 0,
+      mtime: f.mtime || 0,
+      ctime: f.ctime || 0,
+      relative_path: f.relative_path || "",
+      parent_tree: f.parent_tree || "",
+      classification: f.classification || "known",
+      extension: f.extension || f.ext || "",
+    };
+  });
+
+  // Store in review state
+  var idx = window._dupReviewState.groups.findIndex(function(g) { return g.group_id === groupId && g.tier === tier; });
+  window._dupReviewState.currentIndex = idx;
+  window._dupReviewState.currentGroup = group;
+
+  // Fetch detailed review
+  api("POST", "/api/duplicates/review", {
+    group_id: groupId,
+    tier: tier,
+    files: files,
+  }).then(function(review) {
+    window._dupReviewState.currentReview = review;
+    renderDuplicateReviewModal(groupId, tier, review);
+  }).catch(function(err) {
+    showAlert("preview-alert", "error", "Failed to load review: " + err.message);
+  });
+}
+
+function renderDuplicateReviewModal(groupId, tier, review) {
+  // Remove existing modal
+  var existing = document.getElementById("dup-review-modal");
+  if (existing) existing.remove();
+
+  var keeperRec = review.keeper_recommendation || {};
+  var keeperPath = keeperRec.keeper_path || "";
+  var trashCons = review.trash_consequences || {};
+  var metaSumm = review.metadata_summary || {};
+
+  var modal = document.createElement("div");
+  modal.id = "dup-review-modal";
+  modal.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px";
+  var tierLabel = tier === "exact" ? "Exact Duplicate" : "Likely Duplicate";
+  var idx = window._dupReviewState.currentIndex;
+  var total = window._dupReviewState.groups.length;
+
+  var html = "<div style=\"background:var(--surface);border:1px solid #333;border-radius:12px;max-width:700px;width:100%;max-height:90vh;overflow-y:auto;padding:24px;font-family:inherit\">";
+  html += "<h2 style=\"color:var(--accent);margin-bottom:4px\">🔍 Duplicate group review</h2>";
+  html += "<div style=\"color:#888;font-size:12px;margin-bottom:16px\">" + escHtml(tierLabel) + " · Group " + (idx+1) + " of " + total + " · " + review.files.length + " files</div>";
+
+  // Keeper recommendation
+  if (keeperRec.reason) {
+    html += "<div style=\"background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);border-radius:8px;padding:10px 14px;margin-bottom:16px\">";
+    html += "<div style=\"color:var(--success);font-size:12px;font-weight:bold;margin-bottom:4px\">★ SYSTEM RECOMMENDATION</div>";
+    html += "<div style=\"color:var(--text);font-size:13px\">" + escHtml(keeperRec.reason) + "</div>";
+    html += "</div>";
+  }
+
+  // Files list
+  html += "<div style=\"margin-bottom:16px\">";
+  html += "<div style=\"color:var(--text);font-weight:bold;margin-bottom:8px\">Files in this group:</div>";
+  review.files.forEach(function(f) {
+    var path = f.path || "";
+    var isKeeper = path === keeperPath;
+    var meta = metaSumm[path] || {};
+    html += "<div style=\"padding:8px 0;border-bottom:1px solid #222;display:flex;align-items:flex-start;gap:10px\">";
+    // Radio for keeper selection
+    html += "<input type=\"radio\" name=\"keeper_choice\" value=\"" + escHtml(path) + "\"" + (isKeeper ? " checked" : "") + " onclick=\"updateDupReviewKeeper(\'" + escHtml(path) + "\')\" style=\"margin-top:3px;cursor:pointer\">";
+    html += "<div style=\"flex:1;min-width:0\">";
+    html += "<div style=\"font-size:13px;word-break:break-all;color:var(--text)\">" + escHtml(path) + "</div>";
+    html += "<div style=\"color:#666;font-size:11px;margin-top:2px\">";
+    html += "<span>" + fmtSize(meta.size || 0) + "</span>";
+    if (meta.relative_path) html += " · <span>" + escHtml(meta.relative_path) + "</span>";
+    if (meta.parent_tree) html += " · <span>" + escHtml(meta.parent_tree) + "</span>";
+    html += "</div>";
+    if (isKeeper) {
+      html += "<div style=\"color:var(--success);font-size:11px;font-weight:bold;margin-top:4px\">★ Selected to keep</div>";
+    }
+    html += "</div>";
+    html += "<button onclick=\"openFolder(\'" + escHtml(path) + "\')\" style=\"background:rgba(255,255,255,0.08);border:none;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:11px;color:var(--text);white-space:nowrap\" title=\"Open folder\">📁</button>";
+    html += "</div>";
+  });
+  html += "</div>";
+
+  // Trash consequences
+  var trashCount = trashCons.trash_count || 0;
+  var trashSize = trashCons.total_trash_size || 0;
+  html += "<div style=\"background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:8px;padding:10px 14px;margin-bottom:16px\">";
+  html += "<div style=\"color:var(--error);font-size:12px;font-weight:bold;margin-bottom:4px\">⚠️ TRASH CONSEQUENCES</div>";
+  html += "<div style=\"color:var(--text);font-size:13px\">" + trashCount + " file(s) will be moved to trash · " + fmtSize(trashSize) + " freed</div>";
+  html += "<div style=\"color:#888;font-size:11px;margin-top:4px\">Action wording: \"Other selected duplicates will be moved to trash.\"</div>";
+  html += "</div>";
+
+  // Metadata policy
+  html += "<div style=\"color:#555;font-size:11px;margin-bottom:16px\">Metadata policy: " + escHtml(review.metadata_policy_used || "keeper_wins_v1") + "</div>";
+
+  // Action buttons
+  html += "<div style=\"display:flex;gap:10px;flex-wrap:wrap\">";
+  html += "<button id=\"dup-review-confirm\" onclick=\"confirmDuplicateReview(" + groupId + ",'" + escHtml(tier) + "')\" style=\"background:var(--success);color:white;border:none;border-radius:6px;padding:10px 20px;cursor:pointer;font-size:13px;font-weight:bold\">✓ Consolidate — Keep Selected</button>";
+  html += "<button onclick=\"skipDuplicateReview(" + groupId + ",'" + escHtml(tier) + "')\" style=\"background:rgba(255,255,255,0.08);color:var(--text);border:1px solid #444;border-radius:6px;padding:10px 20px;cursor:pointer;font-size:13px\">Skip Group</button>";
+  html += "<button onclick=\"closeDuplicateReviewModal()\" style=\"background:rgba(255,255,255,0.08);color:#888;border:1px solid #333;border-radius:6px;padding:10px 16px;cursor:pointer;font-size:12px\">Cancel</button>";
+  html += "</div>";
+  html += "</div>";
+
+  modal.innerHTML = html;
+  modal.addEventListener("click", function(e) {
+    if (e.target === modal) closeDuplicateReviewModal();
+  });
+  document.body.appendChild(modal);
+
+  // Store selected keeper (default to recommendation)
+  window._dupReviewState.selectedKeeper = keeperPath;
+}
+
+function updateDupReviewKeeper(path) {
+  window._dupReviewState.selectedKeeper = path;
+}
+
+function skipDuplicateReview(groupId, tier) {
+  closeDuplicateReviewModal();
+  // Move to next group
+  var idx = window._dupReviewState.currentIndex;
+  openDuplicateReviewByIndex(idx + 1);
+}
+
+function closeDuplicateReviewModal() {
+  var modal = document.getElementById("dup-review-modal");
+  if (modal) modal.remove();
+  window._dupReviewState.currentReview = null;
+}
+
+async function confirmDuplicateReview(groupId, tier) {
+  var selectedKeeper = window._dupReviewState.selectedKeeper;
+  var review = window._dupReviewState.currentReview;
+  var group = window._dupReviewState.currentGroup;
+
+  if (!selectedKeeper || !review) {
+    showAlert("preview-alert", "error", "No keeper selected");
+    return;
+  }
+
+  var confirmBtn = document.getElementById("dup-review-confirm");
+  if (confirmBtn) {
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "Processing...";
+  }
+
+  try {
+    var result = await api("POST", "/api/duplicates/execute-review", {
+      group_id: groupId,
+      tier: tier,
+      keeper_path: selectedKeeper,
+      files: review.files,
+      dry_run: true,  // SPRINT-10: default dry_run=True for safety
+      output_dir: "",
+    });
+
+    closeDuplicateReviewModal();
+
+    var dryLabel = result.dry_run ? "[DRY-RUN] " : "";
+    var msg = dryLabel + "Consolidated group " + groupId + ": kept " + selectedKeeper.split("/").pop() + ", moved " + result.trash_paths.length + " file(s) to trash.";
+    showAlert("preview-alert", result.dry_run ? "warn" : "success", msg);
+
+    // Advance to next group
+    var idx = window._dupReviewState.currentIndex;
+    openDuplicateReviewByIndex(idx + 1);
+  } catch(err) {
+    showAlert("preview-alert", "error", "Consolidation failed: " + err.message);
+    if (confirmBtn) {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = "✓ Consolidate — Keep Selected";
+    }
   }
 }
 

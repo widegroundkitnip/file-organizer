@@ -149,6 +149,47 @@ class SettingsUpdate(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Pydantic models — Duplicate Review (SPRINT-10)
+# ---------------------------------------------------------------------------
+
+class DuplicateGroupReviewRequest(BaseModel):
+    """SPRINT-10: Request for detailed duplicate group review data."""
+    group_id: int
+    tier: str  # exact | likely | similar
+    files: list[dict]  # list of file dicts with path, size, mtime, etc.
+
+
+class DuplicateGroupReviewResponse(BaseModel):
+    """SPRINT-10: Detailed review data for a single duplicate group."""
+    group_id: int
+    tier: str
+    files: list[dict]  # full file metadata
+    keeper_recommendation: dict  # {keeper_path, reason}
+    trash_consequences: dict  # {trash_count, total_trash_size, files_affected}
+    metadata_summary: dict  # per-file metadata highlights
+    metadata_policy_used: str  # "keeper_wins_v1"
+
+
+class DuplicateConsolidateRequest(BaseModel):
+    """SPRINT-10: User's consolidate decision for a duplicate group."""
+    group_id: int
+    tier: str
+    keeper_path: str  # path the user chose to keep
+    # Other paths → moved to trash (executor receives delete actions)
+
+
+class DuplicateConsolidateResponse(BaseModel):
+    """SPRINT-10: Result of executing a duplicate consolidation."""
+    group_id: int
+    keeper_path: str
+    trash_paths: list[str]
+    output_dir: str
+    undo_log_path: str
+    action_ids: list[str]
+    dry_run: bool
+
+
+# ---------------------------------------------------------------------------
 # API: Scan
 # ---------------------------------------------------------------------------
 
@@ -583,6 +624,175 @@ async def api_log_action(event: LearnerActionEvent):
     except Exception as e:
         logger.error(f"[LEARNER] Failed to log action: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Log action error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# API: Duplicate Review (SPRINT-10)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/duplicates/review", response_model=DuplicateGroupReviewResponse)
+async def api_duplicate_review(req: DuplicateGroupReviewRequest):
+    """
+    SPRINT-10: Return detailed review data for a single duplicate group.
+
+    Shows:
+    - All files in the group
+    - System-recommended keeper + reason
+    - Metadata summary per file
+    - Trash consequences
+    """
+    from scanner.duplicate import recommend_keeper
+
+    files = req.files
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    # Keeper recommendation
+    rec = recommend_keeper(files)
+
+    # Metadata summary per file
+    metadata_summary = {}
+    for f in files:
+        path = f.get("path", "")
+        metadata_summary[path] = {
+            "size": f.get("size_bytes") or f.get("size", 0),
+            "mtime": f.get("mtime", 0.0),
+            "ctime": f.get("ctime", 0.0),
+            "extension": f.get("extension") or f.get("ext", ""),
+            "relative_path": f.get("relative_path", ""),
+            "parent_tree": f.get("parent_tree", ""),
+            "classification": f.get("classification", "known"),
+        }
+
+    # Trash consequences: all files except keeper
+    trash_paths = [f.get("path", "") for f in files if f.get("path", "") != rec["keeper_path"]]
+    total_trash_size = sum(
+        (f.get("size_bytes") or f.get("size", 0))
+        for f in files
+        if f.get("path", "") != rec["keeper_path"]
+    )
+
+    return DuplicateGroupReviewResponse(
+        group_id=req.group_id,
+        tier=req.tier,
+        files=files,
+        keeper_recommendation={
+            "keeper_path": rec["keeper_path"],
+            "reason": rec["reason"],
+        },
+        trash_consequences={
+            "trash_count": len(trash_paths),
+            "total_trash_size": total_trash_size,
+            "files_affected": trash_paths,
+        },
+        metadata_summary=metadata_summary,
+        metadata_policy_used="keeper_wins_v1",
+    )
+
+
+@app.post("/api/duplicates/execute-review")
+async def api_duplicate_execute_review(req: DuplicateConsolidateRequest):
+    """
+    SPRINT-10: Execute a duplicate consolidation decision.
+
+    User chose keeper_path → executor receives: delete_to_trash for all other paths.
+    Grouped transaction with single undo log entry per file.
+
+    The plan emitted is a list of delete actions (one per duplicate to trash),
+    all tagged with the same group_id for undo grouping.
+    """
+    import uuid
+
+    keeper_path = req.keeper_path
+    all_paths = set(f.get("path", "") for f in req.files) if req.files else set()
+    trash_paths = [p for p in all_paths if p and p != keeper_path]
+
+    if not trash_paths:
+        return DuplicateConsolidateResponse(
+            group_id=req.group_id,
+            keeper_path=keeper_path,
+            trash_paths=[],
+            output_dir="",
+            undo_log_path="",
+            action_ids=[],
+            dry_run=req.dry_run,
+        )
+
+    # Build grouped action plan — all delete actions for this group
+    action_plan = []
+    action_ids = []
+    group_id_str = f"dup_merge_{req.group_id}_{uuid.uuid4().hex[:8]}"
+
+    for path in trash_paths:
+        action_id = str(uuid.uuid4())
+        action_ids.append(action_id)
+        action_plan.append({
+            "action": "delete",
+            "path": path,
+            "plan_id": group_id_str,
+            "action_id": action_id,
+            "src_identity": {},
+        })
+
+    # Write plan to temp file
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False, dir="/tmp", prefix="fo_dup_plan_"
+    ) as tmp:
+        json.dump(action_plan, tmp, indent=2)
+        plan_path = tmp.name
+
+    settings = load_settings()
+    output_dir = os.path.expanduser(req.output_dir or settings.get("base_output_dir", "/tmp/file-organizer-output"))
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Pre-flight
+    missing = [p for p in trash_paths if not os.path.exists(p)]
+    if missing and not req.dry_run:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Files not found (deleted since review?): {missing[:5]}"
+        )
+
+    cmd = [
+        sys.executable, str(BASE_DIR / "executor.py"),
+        "execute",
+        "--plan", plan_path,
+        "--output-dir", output_dir,
+        "--on-conflict", "skip",
+    ]
+    if req.dry_run:
+        cmd.append("--dry-run")
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Execute timed out (600s)")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Execute error: {e}")
+
+    # Find the undo log path from output dir
+    undo_log_path = ""
+    try:
+        undo_logs = sorted(Path(output_dir).glob("undo_*.json"), key=lambda p: p.stat().st_mtime)
+        if undo_logs:
+            undo_log_path = str(undo_logs[-1])
+    except Exception:
+        pass
+
+    return DuplicateConsolidateResponse(
+        group_id=req.group_id,
+        keeper_path=keeper_path,
+        trash_paths=trash_paths,
+        output_dir=output_dir,
+        undo_log_path=undo_log_path,
+        action_ids=action_ids,
+        dry_run=req.dry_run,
+    )
 
 
 # ---------------------------------------------------------------------------
