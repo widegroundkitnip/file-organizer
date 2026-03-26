@@ -221,7 +221,7 @@ def make_temp(root, count, scale):
         rnd_name = gen_name("temp_")
         size_kb = (i % 10 + 1) * 10  # 10 KB to 100 KB
         write_random_file(f"{root}/{rnd_name}.tmp", size_kb * 1024)
-        write_random_file(f"{root}/{gen_name("log_")}.log", size_kb * 1024)
+        write_random_file(f"{root}/{gen_name('log_')}.log", size_kb * 1024)
 
 
 def make_duplicates(root, count, scale):

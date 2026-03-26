@@ -369,7 +369,7 @@ function renderScanHistory() {
 async function loadScan(scanId) {
   try {
     const scanMeta = await api('GET', `/scans/${scanId}`);
-    state.manifestPath = scanMeta.manifest_id || scanMeta.manifest_path || scanId;
+    state.manifestPath = scanMeta.manifest_path || scanMeta.manifest_id || scanId;
     const manifestId = scanMeta.manifest_id || scanMeta.manifest_path || scanId;
     const manifest = scanMeta.manifest || await api('GET', `/manifest/${manifestId}`);
     state.manifest = manifest;
@@ -432,7 +432,7 @@ async function startScan() {
     }, { signal: controller.signal });
     console.log('[scan] /api/scan response', result);
 
-    state.manifestPath = result.manifest_id || result.manifest_path;
+    state.manifestPath = result.manifest_path || result.manifest_id;
 
     const manifestId = result.manifest_id || result.manifest_path;
     const manifest = await api('GET', `/manifest/${manifestId}`);
@@ -604,6 +604,7 @@ function renderResults() {
   const projRoots = m.detected_project_roots || [];
   const projStats = m.project_detection_stats || {};
   let projHtml = '';
+  let metaHtml = '';
   if (projRoots.length > 0) {
     const badgeColor = { high: 'var(--success)', medium: 'var(--warning)', low: 'var(--muted)', informational: 'var(--muted)' };
     projHtml = `
@@ -626,7 +627,7 @@ function renderResults() {
       </div>`;
   }
 
-  const metaHtml = `
+  metaHtml = `
     <div class="card" style="margin-bottom:12px">
       <div class="card-title">ℹ Scan Summary</div>
       <div class="text-muted text-sm" style="margin-bottom:8px">
@@ -634,10 +635,10 @@ function renderResults() {
       </div>
       ${categorySummaryHtml || '<div class="text-muted text-sm">No categorized files in this manifest.</div>'}
     </div>
-  ` + (projHtml || '');
+  `;
 
   document.getElementById('results-content').innerHTML =
-    statsHtml + metaHtml +
+    statsHtml + metaHtml + projHtml +
     `<div class="card"><div class="card-title">📁 Files by Category</div>${catHtml}</div>` +
     dupHtml;
 }
@@ -2254,7 +2255,7 @@ async function pollRuleStatus() {
         return;
     }
     try {
-        var data = await api('GET', '/api/rules/status');
+        var data = await api('GET', '/rules/status');
         var newStatus = {};
         if (Array.isArray(data.statuses)) {
             data.statuses.forEach(function(s) {
