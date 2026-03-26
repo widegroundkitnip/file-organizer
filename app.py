@@ -1211,18 +1211,15 @@ async def api_folder_picker(req: dict):
     # macOS: use osascript
     if sys.platform == 'darwin':
         try:
-            alias_result = subprocess.run(
-                ['osascript', '-e', 'choose folder with prompt "Select a folder"'],
+            posix_result = subprocess.run(
+                ['osascript',
+                 '-e', 'set f to choose folder with prompt "Select a folder"',
+                 '-e', 'POSIX path of f'],
                 capture_output=True, text=True, timeout=30
             )
-            if alias_result.returncode == 0:
-                posix_result = subprocess.run(
-                    ['osascript', '-e', f'POSIX path of "{alias_result.stdout.strip()}"'],
-                    capture_output=True, text=True, timeout=5
-                )
-                if posix_result.returncode == 0:
-                    path = posix_result.stdout.strip().rstrip('/')
-                    return {'ok': True, 'path': path}
+            if posix_result.returncode == 0 and posix_result.stdout.strip():
+                path = posix_result.stdout.strip().rstrip('/')
+                return {'ok': True, 'path': path}
         except Exception:
             pass
 
