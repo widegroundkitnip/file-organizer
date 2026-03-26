@@ -122,7 +122,7 @@
           <label>Folder Path</label>
           <div style="display:flex;gap:8px;align-items:center">
             <input type="file" id="scan-path-picker" webkitdirectory style="display:none" onchange="handleBrowseFolder(this, 'scan-path')">
-            <input type="hidden" id="scan-path" value="">
+            <input type="hidden" id="scan-path">
             <div id="scan-path-display" onclick="document.getElementById('scan-path-picker').click()" style="flex:1;padding:8px 12px;border-radius:6px;border:1px solid #333;background:var(--surface);color:var(--muted);font-family:monospace;font-size:13px;cursor:pointer;min-height:36px;display:flex;align-items:center;gap:8px" class="path-display-empty"><span>📁</span><span style="color:var(--muted);font-style:italic">click to browse…</span></div>
             <button class="btn btn-secondary" onclick="document.getElementById('scan-path-picker').click()" style="white-space:nowrap">📁 Browse</button>
           </div>

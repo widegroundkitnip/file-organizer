@@ -2006,9 +2006,16 @@ function handleBrowseFolder(input, targetId) {
             resolvedPath = fullPath;
         }
     } else {
-        // Fallback for restricted browsers: use directory name
-        var dir = files[0].webkitRelativePath.split('/').filter(Boolean)[0] || 'selected-folder';
-        resolvedPath = '/' + dir;
+        // Fallback for restricted browsers: extract best available path
+        var relPath2 = files[0].webkitRelativePath || '';
+        var parts = relPath2.split('/').filter(Boolean);
+        if (parts.length > 1) {
+            // Has subdirectory component — use the first dir name as hint only
+            resolvedPath = parts[0];
+        } else {
+            // Single file, no path info — best we can do
+            resolvedPath = parts[0] || 'selected-folder';
+        }
     }
 
     // Clear the input immediately to prevent re-selection issues
